@@ -1,1 +1,31 @@
+# === AI/IDE 工作目录 ===
+.opencode/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# === 设计文档（流动型，不追踪）===
+/DESIGN.md
+
+# === 过时架构文档 ===
+/docs/*.md
+
+# === 参考项目 ===
 studying/
+
+# === 构建输出 ===
+dist/
+build/
+out/
+
+# === 依赖 ===
+node_modules/
+bun.lock
+bun.lockb
+
+# === 系统 ===
+.DS_Store
+Thumbs.db
+*.log

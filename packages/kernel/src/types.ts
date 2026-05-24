@@ -4,20 +4,17 @@
 
 export type Role = 'system' | 'user' | 'assistant';
 
-/** A single message in the conversation */
 export interface Message {
   role: Role;
   content: string;
 }
 
-/** Token usage reported by the provider API */
 export interface Usage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
 }
 
-/** A single chunk from the streaming response */
 export interface StreamChunk {
   type: 'content' | 'done' | 'error';
   content?: string;
@@ -25,7 +22,6 @@ export interface StreamChunk {
   usage?: Usage;
 }
 
-/** Provider-level configuration (one provider) */
 export interface ProviderConfig {
   name: string;
   type: string;
@@ -38,7 +34,51 @@ export interface ProviderConfig {
   temperature: number;
 }
 
-/** Full application configuration */
 export interface AppConfig {
   provider: ProviderConfig;
+}
+
+// ─── Session tree ─────────────────────────────────────────
+
+export interface SessionMeta {
+  /** Auto-generated name: "HHmm-branch" after 3 turns */
+  name: string;
+  /** Worktree-bound unique ID */
+  id: string;
+  /** Parent session ID (for tree navigation) */
+  parentId: string | null;
+  /** Creation timestamp */
+  createdAt: string;
+  /** Last activity timestamp */
+  updatedAt: string;
+  /** How many turns (user+assistant pairs) so far */
+  turnCount: number;
+}
+
+/** A checkpoint for undo — saves messages before processing a user input */
+export interface UndoCheckpoint {
+  id: number;
+  messages: Message[];
+  timestamp: string;
+  label: string;
+}
+
+// ─── Snapshot ─────────────────────────────────────────────
+
+export interface SnapshotInfo {
+  hash: string;
+  date: string;
+  message: string;
+  files: number;
+}
+
+// ─── Worktree ─────────────────────────────────────────────
+
+export interface WorktreeInfo {
+  id: string;
+  root: string;
+  branch: string;
+  isGit: boolean;
+  commit: string;
+  label: string;
 }

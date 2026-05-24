@@ -3,29 +3,34 @@
 /**
  * @extendai/cli — CLI Entry Point
  *
- * Wires together kernel, config, and interactive chat.
+ * Wires together kernel, config, worktree, snapshots, and interactive chat.
  * Usage:
  *   extendai                    Start interactive chat
  *   extendai --help             Show help
  *   extendai --version          Show version
  *   extendai --model <name>     Start with specific model
+ *   extendai --init-git         Initialize git repo + .gitignore for current dir
  */
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { loadConfig, saveConfig } from '@extendai/kernel';
+import {
+  loadConfig,
+  saveConfig,
+  detectWorktree,
+  ensureGit,
+  ensureGitIgnore,
+  initSnapshotRepo,
+} from '@extendai/kernel';
 import { startChat } from './chat.js';
 
-/** Read package.json version, working from both src/ and dist/ */
 function getVersion(): string {
   try {
-    // Try from dist/ first (built)
     const distPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../package.json');
     return JSON.parse(readFileSync(distPath, 'utf-8')).version;
   } catch {
     try {
-      // Fallback to src/ (dev mode)
       const srcPath = resolve(dirname(fileURLToPath(import.meta.url)), '../package.json');
       return JSON.parse(readFileSync(srcPath, 'utf-8')).version;
     } catch {
@@ -37,8 +42,9 @@ function getVersion(): string {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const version = getVersion();
+  const cwd = process.cwd();
 
-  // ── Help ────────────────────────────────────────────
+  // ── Help ──────────────────────────────────────────────
 
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
@@ -50,6 +56,7 @@ async function main(): Promise<void> {
     extendai --version           Show version
     extendai --model <name>      Start with specific model
     extendai --init              Create default config at ~/.extendai/config.json
+    extendai --init-git          Init git repo + .gitignore in current directory
 
   Configuration (priority: env > config file > defaults):
     EXTENDAI_API_KEY   API key (required)
@@ -61,14 +68,14 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // ── Version ─────────────────────────────────────────
+  // ── Version ───────────────────────────────────────────
 
   if (args.includes('--version') || args.includes('-v')) {
     console.log(`extendai v${version}`);
     process.exit(0);
   }
 
-  // ── Init config ─────────────────────────────────────
+  // ── Init config ───────────────────────────────────────
 
   if (args.includes('--init')) {
     const config = loadConfig();
@@ -82,17 +89,32 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // ── Load configuration ──────────────────────────────
+  // ── Init git ──────────────────────────────────────────
+
+  if (args.includes('--init-git')) {
+    const created = ensureGit(cwd);
+    ensureGitIgnore(cwd);
+    console.log('');
+    if (created) {
+      console.log('  Git repository initialized.');
+    } else {
+      console.log('  Already a git repository.');
+    }
+    console.log('  .extendai/ added to .gitignore (snapshot data excluded from project git).');
+    console.log('');
+    process.exit(0);
+  }
+
+  // ── Load configuration ────────────────────────────────
 
   const config = loadConfig();
 
-  // Apply --model override
   const modelIdx = args.indexOf('--model');
   if (modelIdx !== -1 && args[modelIdx + 1]) {
     config.provider.model = args[modelIdx + 1];
   }
 
-  // ── Validate API key ────────────────────────────────
+  // ── Validate API key ──────────────────────────────────
 
   if (!config.provider.apiKey) {
     console.error('');
@@ -109,9 +131,22 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // ── Start chat ──────────────────────────────────────
+  // ── Detect worktree & init snapshots ──────────────────
 
-  await startChat(config);
+  const worktree = detectWorktree(cwd);
+
+  if (worktree.isGit) {
+    try {
+      initSnapshotRepo(worktree.root);
+      ensureGitIgnore(worktree.root);
+    } catch {
+      // Non-fatal: snapshots are optional
+    }
+  }
+
+  // ── Start chat ────────────────────────────────────────
+
+  await startChat(config, worktree);
 }
 
 main().catch((e) => {
