@@ -56,3 +56,36 @@ export {
   generateSessionId,
   formatSessionName,
 } from './namer.js';
+
+export {
+  ToolRegistry,
+  createDefaultRegistry,
+  bashTool,
+  browserTool,
+  createQuestionTool,
+  askQuestion,
+  PermissionGuard,
+  DangerousDetector,
+  ApprovalGate,
+} from './tools/index.js';
+export type {
+  Tool,
+  ToolContext,
+  ToolChunk,
+  ToolDefinition,
+  PermissionSpec,
+  PermissionRule,
+  PermissionResult,
+  PermissionAction,
+  SafetyAssessment,
+  FileOperation,
+  ApprovalPrompt,
+  ApprovalDecision,
+  ApprovalOption,
+  ApprovalOptionKind,
+  AutoAcceptMode,
+  QuestionParams,
+  QuestionResult,
+  QuestionOption,
+  QuestionHandler,
+} from './tools/index.js';
