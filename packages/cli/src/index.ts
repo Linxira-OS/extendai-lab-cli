@@ -114,9 +114,13 @@ async function main(): Promise<void> {
     config.provider.model = args[modelIdx + 1];
   }
 
-  // ── Validate API key ──────────────────────────────────
+  // ── Validate API key (skip for known local providers) ──
+  const isLocalProvider =
+    config.provider.baseUrl.includes('localhost') ||
+    config.provider.baseUrl.includes('127.0.0.1') ||
+    config.provider.baseUrl.includes('0.0.0.0');
 
-  if (!config.provider.apiKey) {
+  if (!config.provider.apiKey && !isLocalProvider) {
     console.error('');
     console.error('  Error: API key not set.');
     console.error('');
@@ -127,6 +131,8 @@ async function main(): Promise<void> {
     console.error('  Or create a config file:');
     console.error('    extendai --init');
     console.error('    Then edit ~/.extendai/config.json and add your apiKey');
+    console.error('');
+    console.error('  Local provider detected? Set EXTENDAI_BASE_URL and EXTENDAI_API_KEY=ollama');
     console.error('');
     process.exit(1);
   }

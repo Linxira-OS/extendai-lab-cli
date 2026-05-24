@@ -85,7 +85,7 @@ export async function startChat(config: AppConfig, worktree: WorktreeInfo): Prom
   const outMax = (config.provider.maxTokens / 1000).toFixed(0);
   const keyHint = config.provider.apiKey
     ? `***${config.provider.apiKey.slice(-4)}`
-    : '(not set)';
+    : '(local)';
 
   console.log('');
   console.log('  ╔══════════════════════════════════════════════╗');
