@@ -17,9 +17,7 @@ import type { AppConfig, WorktreeInfo } from '@extendai/kernel';
 import {
   Session,
   streamCompletion,
-  takeSnapshot,
-  listSnapshots,
-  snapshotDiff,
+  SnapshotService,
 } from '@extendai/kernel';
 
 // ─── Dialog history ────────────────────────────────────────
@@ -220,7 +218,7 @@ async function handleCommand(
       }
       const msg = parts.slice(1).join(' ') || session.displayName;
       try {
-        const hash = takeSnapshot(worktree.root, session.meta.id, msg);
+        const hash = new SnapshotService(worktree.root, worktree.id ?? 'default').track();
         if (hash) {
           console.log(`  Snapshot taken: ${hash}\n`);
         } else {
@@ -238,7 +236,7 @@ async function handleCommand(
         console.log('  No snapshots (not a git repository).\n');
         return true;
       }
-      const snaps = listSnapshots(worktree.root, 10);
+      const snaps = new SnapshotService(worktree.root, worktree.id ?? 'default').listSnapshots(10);
       if (snaps.length === 0) {
         console.log('  No snapshots yet.\n');
       } else {

@@ -1,215 +1,316 @@
 /**
  * @extendai/kernel — Snapshot file change tracker
  *
- * Maintains an independent git repository for file-change history.
- * Location: <project-root>/.extendai/snapshots/
- * NOT in the project's own git — .extendai/ is added to .gitignore.
+ * Maintains an independent git repository for AI file-change history.
+ * COMPLETELY SEPARATE from the project's own git — .extendai/ is in .gitignore.
  *
- * Protection:
- *   The permission system blocks AI writes to .extendai/ directory,
- *   protecting snapshots from accidental deletion during AI operations.
+ * Architecture (OpenCode-style):
+ *   - Snapshot repo stored at ~/.extendai/snapshots/<project-hash>/<worktree-hash>/
+ *   - Uses `--git-dir <snapshot-repo> --work-tree <project-root>` to track project files
+ *     while storing git metadata in the snapshot repo (outside the project).
+ *   - track() -> git add -A + git write-tree -> returns tree hash (not commit hash)
+ *   - patch(hash) -> computes what changed since a previous tree hash
+ *   - revert(patches) -> git checkout hash -- file for each file in each patch
  *
- * Retention:
- *   - Max 1000 commits
- *   - Auto-cleanup on each new snapshot
- *   - 7-day commit expiry
- *
- * This is the LAST RESORT file rollback mechanism.
- * Layer 1: /undo (session-level, restores user message)
- * Layer 2: /snapshot revert (git-level, restores files)
+ * Layered protection:
+ *   Layer 1: /undo (session-level, restores messages + file changes)
+ *   Layer 2: /snapshot revert (git-level, explicit file restore)
+ * Permissions: AI cannot write to .extendai/ (handled by PermissionGuard)
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join, relative } from 'node:path';
 
-const SNAPSHOT_DIR = '.extendai/snapshots';
+// ─── Types ────────────────────────────────────────────────
 
-export interface Snapshot {
+/** A patch describing file changes between two snapshot points. */
+export interface SnapshotPatch {
+  /** The "before" tree hash */
+  hash: string;
+  /** Changed file paths (absolute, project-root-relative stored in git) */
+  files: string[];
+}
+
+/** Commit-style record for list/display */
+export interface SnapshotRecord {
   hash: string;
   date: string;
   message: string;
   files: number;
 }
 
-/**
- * Initialize the snapshot git repository.
- * Creates a bare-like repo for efficient storage.
- */
-export function initSnapshotRepo(projectRoot: string): void {
-  const repoDir = join(projectRoot, SNAPSHOT_DIR);
+// ─── SnapshotService ──────────────────────────────────────
 
-  if (existsSync(repoDir)) return; // Already initialized
+export class SnapshotService {
+  private gitdir: string;
+  private worktree: string;
+  private initialized = false;
+  private readonly STORAGE_BASE = join(homedir(), '.extendai', 'snapshots');
 
-  mkdirSync(repoDir, { recursive: true });
-  execSync('git init', { cwd: repoDir, encoding: 'utf-8', stdio: 'ignore' });
+  constructor(projectRoot: string, worktreeId: string) {
+    const projectHash = createHash('sha256')
+      .update(projectRoot.toLowerCase())
+      .digest('hex')
+      .slice(0, 16);
 
-  // Configure git for snapshot-only use
-  execSync('git config user.name "ExtendAI Snapshot"', { cwd: repoDir, encoding: 'utf-8', stdio: 'ignore' });
-  execSync('git config user.email "snapshot@extendai.local"', { cwd: repoDir, encoding: 'utf-8', stdio: 'ignore' });
+    this.gitdir = join(this.STORAGE_BASE, projectHash, worktreeId);
+    this.worktree = projectRoot;
+  }
 
-  // Initial empty commit
-  execSync('git commit --allow-empty -m "init"', { cwd: repoDir, encoding: 'utf-8', stdio: 'ignore' });
-}
+  /** Full path to the snapshot git repo (for debugging) */
+  get repoPath(): string {
+    return this.gitdir;
+  }
 
-/**
- * Take a snapshot of all tracked files.
- * @returns the snapshot hash
- */
-export function takeSnapshot(projectRoot: string, sessionId: string, message: string = ''): string {
-  const repoDir = join(projectRoot, SNAPSHOT_DIR);
-  if (!existsSync(repoDir)) initSnapshotRepo(projectRoot);
+  // ── git helpers ────────────────────────────────────────
 
-  // Add all files (respecting project .gitignore)
-  execSync('git add -A', { cwd: projectRoot, encoding: 'utf-8', stdio: 'ignore' });
+  private git(args: string[], opts?: { stdin?: string; trim?: boolean }): string {
+    const cmd = ['git', '--git-dir', this.gitdir, '--work-tree', this.worktree, ...args];
+    try {
+      const result = execSync(cmd.join(' '), {
+        cwd: this.worktree,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        input: opts?.stdin,
+        maxBuffer: 10 * 1024 * 1024, // 10MB
+      });
+      return opts?.trim !== false ? result.trim() : result;
+    } catch (e: unknown) {
+      const err = e as Error & { stderr?: string; stdout?: string };
+      throw new Error(`git snapshot error: ${err.stderr || err.message}`);
+    }
+  }
 
-  // Check if there are changes to commit
-  const status = execSync('git status --porcelain', {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
+  /** Execute git in the snapshot dir only (no worktree) */
+  private gitDir(args: string[]): string {
+    const cmd = ['git', '--git-dir', this.gitdir, ...args];
+    try {
+      return execSync(cmd.join(' '), {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+    } catch (e: unknown) {
+      const err = e as Error & { stderr?: string };
+      throw new Error(`git snapshot error: ${err.stderr || err.message}`);
+    }
+  }
 
-  if (!status.trim()) return ''; // No changes
+  // ── Lifecycle ──────────────────────────────────────────
 
-  const date = new Date().toISOString();
-  const commitMsg = `session:${sessionId} date:${date} ${message}`.trim();
+  /**
+   * Initialize the snapshot git repository.
+   * Creates a bare-like repo at ~/.extendai/snapshots/<hash>/<worktree>/
+   */
+  init(): void {
+    if (this.initialized) return;
 
-  execSync(`git commit -m "${escapeCommitMsg(commitMsg)}"`, {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: 'ignore',
-  });
+    if (!existsSync(this.gitdir)) {
+      mkdirSync(this.gitdir, { recursive: true });
 
-  const hash = execSync('git rev-parse --short HEAD', {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
+      // git init with minimal config
+      this.gitDir(['init', '--bare']);
+      this.gitDir(['config', 'core.autocrlf', 'false']);
+      this.gitDir(['config', 'core.longpaths', 'true']);
+      this.gitDir(['config', 'core.symlinks', 'true']);
+      this.gitDir(['config', 'core.fsmonitor', 'false']);
+      this.gitDir(['config', 'user.name', 'ExtendAI Snapshot']);
+      this.gitDir(['config', 'user.email', 'snapshot@extendai.local']);
 
-  // Enforce retention policy
-  enforceRetention(repoDir);
+      // Sync project's gitignore excludes into snapshot repo
+      this.syncGitIgnore();
+    }
 
-  return hash;
-}
+    this.initialized = true;
+  }
 
-/**
- * Revert files to a specific snapshot state.
- * @param hash snapshot hash to revert to
- */
-export function revertToSnapshot(projectRoot: string, hash: string): string {
-  const repoDir = join(projectRoot, SNAPSHOT_DIR);
-  if (!existsSync(repoDir)) throw new Error('Snapshot repo not initialized');
+  /**
+   * Copy project's .gitignore rules into snapshot repo's info/exclude
+   * so that git ignore rules are respected even outside a normal git repo context.
+   */
+  private syncGitIgnore(): void {
+    try {
+      // Check project's own gitignore via check-ignore against its own .git
+      const projectGitDir = join(this.worktree, '.git');
+      const checkIgnorePath = join(this.worktree, '.gitignore');
 
-  // Checkout the snapshot (restores all files, detaching HEAD)
-  const output = execSync(`git checkout ${hash} -- .`, {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+      if (existsSync(projectGitDir)) {
+        // Read project's exclude file
+        const projectExclude = join(this.worktree, '.git', 'info', 'exclude');
+        let content = '';
 
-  return output.trim();
-}
+        if (existsSync(projectExclude)) {
+          const fs = require('fs') as typeof import('fs');
+          content = fs.readFileSync(projectExclude, 'utf-8');
+        }
 
-/**
- * List all snapshots.
- */
-export function listSnapshots(projectRoot: string, limit: number = 20): Snapshot[] {
-  const repoDir = join(projectRoot, SNAPSHOT_DIR);
-  if (!existsSync(repoDir)) return [];
+        // Also read .gitignore
+        if (existsSync(checkIgnorePath)) {
+          const fs = require('fs') as typeof import('fs');
+          content += '\n' + fs.readFileSync(checkIgnorePath, 'utf-8');
+        }
 
-  const output = execSync(
-    `git log --oneline --format="%h|%ci|%s" -${limit}`,
-    { cwd: repoDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
-  );
+        // Write to snapshot repo's info/exclude
+        const excludeDir = join(this.gitdir, 'info');
+        if (!existsSync(excludeDir)) {
+          mkdirSync(excludeDir, { recursive: true });
+        }
+        const fs = require('fs') as typeof import('fs');
+        fs.writeFileSync(join(this.gitdir, 'info', 'exclude'), content, 'utf-8');
+      }
+    } catch {
+      // Non-fatal: gitignore sync failure
+    }
+  }
 
-  return output
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((line: string) => {
-      const [hash, date, ...msgParts] = line.split('|');
-      return { hash, date: date || '', message: msgParts.join('|'), files: 0 };
-    });
-}
+  // ── Core Operations ────────────────────────────────────
 
-/**
- * Show diff for a snapshot.
- */
-export function snapshotDiff(projectRoot: string, hash: string): string {
-  const repoDir = join(projectRoot, SNAPSHOT_DIR);
-  if (!existsSync(repoDir)) return '';
+  /**
+   * Track current state of all project files.
+   * Equivalent to git add -A + git write-tree.
+   * Returns the tree hash (or empty string if no changes).
+   *
+   * Respects .gitignore via `--work-tree`'s natural behavior.
+   */
+  track(): string {
+    this.init();
 
-  return execSync(`git show --stat ${hash}`, {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-}
+    // Stage all changes (respects .gitignore via --work-tree)
+    this.git(['add', '-A']);
 
-/**
- * Get diff between two snapshots.
- */
-export function snapshotDiffBetween(projectRoot: string, fromHash: string, toHash: string): string {
-  const repoDir = join(projectRoot, SNAPSHOT_DIR);
-  if (!existsSync(repoDir)) return '';
+    // Check if anything changed
+    const status = this.git(['status', '--porcelain']);
+    if (!status) return '';
 
-  return execSync(`git diff --stat ${fromHash}..${toHash}`, {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
-}
+    // Write tree and return hash
+    return this.git(['write-tree']);
+  }
 
-// ─── Retention ────────────────────────────────────────────
+  /**
+   * Compute what changed since a given tree hash.
+   * @param hash - the "before" tree hash (from a previous track() call)
+   * @returns SnapshotPatch with changed file list
+   */
+  patch(hash: string): SnapshotPatch {
+    // diff --cached compares the index (staging) against a tree
+    const output = this.git(['diff', '--cached', '--name-only', hash, '--', '.']);
+    const files = output ? output.split('\n').filter(Boolean) : [];
+    return { hash, files };
+  }
 
-const MAX_COMMITS = 1000;
-const MAX_DAYS = 7;
+  /**
+   * Batch compute patches for multiple tree hashes.
+   * More efficient than individual patch() calls.
+   */
+  patchBatch(hashes: string[]): SnapshotPatch[] {
+    return hashes.map(h => this.patch(h)).filter(p => p.files.length > 0);
+  }
 
-function enforceRetention(repoDir: string): void {
-  // Count commits
-  const count = parseInt(
-    execSync('git rev-list --count HEAD', {
-      cwd: repoDir,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim(),
-    10,
-  );
+  /**
+   * Revert files to the state captured in the patches.
+   * Uses `git checkout <hash> -- <file>` for each unique hash-file pair.
+   * Files that didn't exist in the snapshot are deleted.
+   */
+  revert(patches: SnapshotPatch[]): void {
+    // Group files by hash for efficient checkout
+    const groups = new Map<string, string[]>();
+    for (const p of patches) {
+      for (const f of p.files) {
+        const list = groups.get(p.hash) || [];
+        list.push(f);
+        groups.set(p.hash, list);
+      }
+    }
 
-  if (count <= MAX_COMMITS) return;
+    // For each hash, checkout all files at once
+    for (const [hash, files] of groups) {
+      // Check which files exist in the tree
+      const lsResult = this.gitDir(['ls-tree', hash, ...files]);
+      const existingFiles = new Set(
+        lsResult.split('\n')
+          .filter(Boolean)
+          .map(line => line.split('\t').pop()!)
+      );
 
-  // Remove old commits (keep most recent MAX_COMMITS)
-  const toRemove = count - MAX_COMMITS;
-  const oldestKept = execSync(`git rev-list --reverse HEAD | head -${toRemove + 1} | tail -1`, {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
+      // Files that exist in snapshot -> checkout
+      const toCheckout = files.filter(f => existingFiles.has(f));
+      if (toCheckout.length > 0) {
+        this.git(['checkout', hash, '--', ...toCheckout]);
+      }
 
-  // Create a new orphan branch and graft
-  execSync(`git checkout --orphan temp ${oldestKept}`, {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: 'ignore',
-  });
-  execSync('git commit -m "squash old snapshots"', {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: 'ignore',
-  });
-  execSync('git rebase --onto temp HEAD', {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: 'ignore',
-  });
-  execSync('git branch -D temp', {
-    cwd: repoDir,
-    encoding: 'utf-8',
-    stdio: 'ignore',
-  });
-}
+      // Files that DON'T exist in snapshot -> delete
+      const toDelete = files.filter(f => !existingFiles.has(f));
+      for (const f of toDelete) {
+        const absPath = join(this.worktree, f);
+        try {
+          if (existsSync(absPath)) unlinkSync(absPath);
+        } catch {
+          // File may already be gone
+        }
+      }
+    }
+  }
 
-function escapeCommitMsg(msg: string): string {
-  return msg.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+  /**
+   * Restore ALL files to a specific tree hash.
+   * Uses `git checkout <hash> -- .` — a full restore.
+   */
+  restore(hash: string): void {
+    this.git(['checkout', hash, '--', '.']);
+  }
+
+  /**
+   * Show diff between two snapshots (for display).
+   * @param fromHash - earlier tree hash
+   * @param toHash - later tree hash (default: current index)
+   */
+  diff(fromHash: string, toHash?: string): string {
+    if (toHash) {
+      return this.git(['diff', '--stat', `${fromHash}..${toHash}`]);
+    }
+    return this.git(['diff', '--stat', fromHash, '--', '.']);
+  }
+
+  /** Get diff with full content */
+  diffFull(fromHash: string, toHash?: string): string {
+    if (toHash) {
+      return this.git(['diff', fromHash, toHash]);
+    }
+    return this.git(['diff', fromHash, '--', '.']);
+  }
+
+  // ── List / History ─────────────────────────────────────
+
+  /**
+   * List recent snapshot commits (for display).
+   * Uses git log on the reflog to show recent tree operations.
+   */
+  listSnapshots(limit: number = 20): SnapshotRecord[] {
+    try {
+      const output = this.gitDir([
+        'log', '--oneline', `-${limit}`,
+        '--format=%h|%ci|%s',
+        '--all',
+      ]);
+      if (!output) return [];
+
+      return output.split('\n').filter(Boolean).map(line => {
+        const [hash, date, ...msgParts] = line.split('|');
+        return { hash, date: date || '', message: msgParts.join('|'), files: 0 };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /** Get count of tracked snapshots. */
+  get commitCount(): number {
+    try {
+      return parseInt(this.gitDir(['rev-list', '--count', '--all']), 10);
+    } catch {
+      return 0;
+    }
+  }
 }

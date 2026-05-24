@@ -4,11 +4,16 @@
  * Session lifecycle:
  *   1. Created with system prompt → unnamed
  *   2. After 3 turns (user+assistant pairs) → auto-named (HHmm-branch)
- *   3. Undo checkpoints created before each user message
- *   4. /undo restores session to the previous checkpoint
+ *   3. Checkpoints saved BEFORE each user message (with snapshot hash)
+ *   4. /undo restores the session to the previous checkpoint
+ *   5. If snapshot hash present, /undo ALSO rolls back file changes
  *
  * Multiple sessions form a tree: a new session can fork from any
  * existing session, inheriting the messages up to that point.
+ *
+ * Reference: OpenCode session/revert.ts — links messages to snapshot commits.
+ * When undo is called, we return the checkpoint so the caller knows which
+ * snapshot patches to revert and which file changes to roll back.
  */
 
 import type { Message, UndoCheckpoint, SessionMeta } from './types.js';
@@ -32,7 +37,7 @@ export class Session {
   readonly meta: SessionMeta;
   /** Child sessions forked from this one */
   readonly children: Session[] = [];
-  /** Undo checkpoint stack (FILO) */
+  /** Undo checkpoint stack (FILO) — each holds messages + optional snapshot hash */
   private checkpoints: UndoCheckpoint[] = [];
   /** Counter for checkpoint IDs */
   private checkpointSeq = 0;
@@ -108,29 +113,44 @@ export class Session {
     return formatSessionName(this.meta.name || null, this.meta.turnCount);
   }
 
-  // ── Undo ────────────────────────────────────────────────
+  // ── Snapshot-linked undo ────────────────────────────────
 
   /**
    * Save an undo checkpoint BEFORE processing a user message.
-   * This captures the current message state, so /undo can roll back to it.
+   *
+   * @param snapshotHash — optional tree hash from SnapshotService.track()
+   *                       capturing file state before this turn.
+   *                       Pass null/undefined for checkpoints that don't
+   *                       modify files (e.g. pure conversation).
+   * @param label — optional human-readable label
    */
-  saveCheckpoint(label: string = ''): void {
+  saveCheckpoint(snapshotHash?: string, label: string = ''): void {
     this.checkpoints.push({
       id: ++this.checkpointSeq,
       messages: this.messages.map(m => ({ ...m })),
       timestamp: new Date().toISOString(),
+      snapshotHash: snapshotHash || null,
       label,
     });
   }
 
   /**
-   * Undo: restore the most recent checkpoint (removing the last user+assistant pair).
-   * Returns the restored messages or null if no checkpoint exists.
+   * Undo: restore the most recent checkpoint.
+   *
+   * Returns the checkpoint info so the caller knows:
+   *   - Which messages to restore (already done internally)
+   *   - Which snapshot hash to revert files to (if any)
+   *
+   * If the checkpoint has a snapshotHash, the caller should call
+   * SnapshotService.restore(snapshotHash) to roll back file changes.
+   *
+   * Returns null if no checkpoint exists.
    */
-  undo(): Message[] | null {
+  undo(): UndoCheckpoint | null {
     const cp = this.checkpoints.pop();
     if (!cp) return null;
 
+    // Restore messages to checkpoint state
     this.messages = cp.messages;
 
     // Recalculate turn count
@@ -141,12 +161,27 @@ export class Session {
     this.meta.turnCount = count;
     this.meta.updatedAt = new Date().toISOString();
 
-    return this.getMessages();
+    return cp;
+  }
+
+  /** Get the most recent undo checkpoint without consuming it. */
+  peekCheckpoint(): UndoCheckpoint | null {
+    return this.checkpoints[this.checkpoints.length - 1] ?? null;
   }
 
   /** Number of available undo steps */
   get undoCount(): number {
     return this.checkpoints.length;
+  }
+
+  /** Get all undo snapshots for display (date + label). */
+  get undoHistory(): Array<{ id: number; timestamp: string; label: string; hasSnapshot: boolean }> {
+    return this.checkpoints.map(cp => ({
+      id: cp.id,
+      timestamp: cp.timestamp,
+      label: cp.label,
+      hasSnapshot: !!cp.snapshotHash,
+    }));
   }
 
   // ── Fork (session tree) ─────────────────────────────────

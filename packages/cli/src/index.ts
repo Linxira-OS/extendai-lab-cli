@@ -21,7 +21,7 @@ import {
   detectWorktree,
   ensureGit,
   ensureGitIgnore,
-  initSnapshotRepo,
+  SnapshotService,
 } from '@extendai/kernel';
 import { startChat } from './chat.js';
 
@@ -146,7 +146,7 @@ async function main(): Promise<void> {
 
   if (worktree.isGit) {
     try {
-      initSnapshotRepo(worktree.root);
+      new SnapshotService(worktree.root, worktree.id ?? 'default').init();
       ensureGitIgnore(worktree.root);
     } catch {
       // Non-fatal: snapshots are optional

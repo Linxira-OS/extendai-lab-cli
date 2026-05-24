@@ -55,11 +55,13 @@ export interface SessionMeta {
   turnCount: number;
 }
 
-/** A checkpoint for undo — saves messages before processing a user input */
+/** A checkpoint for undo — saves messages + optional file snapshot */
 export interface UndoCheckpoint {
   id: number;
   messages: Message[];
   timestamp: string;
+  /** Tree hash from SnapshotService.track() for file rollback, or null */
+  snapshotHash: string | null;
   label: string;
 }
 

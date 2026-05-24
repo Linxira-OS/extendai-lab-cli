@@ -22,6 +22,11 @@ export type {
   WorktreeInfo,
 } from './types.js';
 
+export type {
+  SnapshotPatch,
+  SnapshotRecord,
+} from './snapshot.js';
+
 export {
   streamCompletion,
 } from './provider.js';
@@ -43,12 +48,7 @@ export {
 } from './worktree.js';
 
 export {
-  initSnapshotRepo,
-  takeSnapshot,
-  revertToSnapshot,
-  listSnapshots,
-  snapshotDiff,
-  snapshotDiffBetween,
+  SnapshotService,
 } from './snapshot.js';
 
 export {
