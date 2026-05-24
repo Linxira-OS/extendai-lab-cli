@@ -1,45 +1,52 @@
 # ExtendAI Lab CLI
 
-面向多 LLM 的编码代理 CLI — TUI + 插件系统 + 缓存优先架构。
+> **Linxira-OS 生态中的 AI Agent 工作流引擎** — 多 LLM 编码代理 CLI
+>
+> 插件原生 · 缓存优先 · 模块化架构 · 从头构建
 
-## 设计目标
+---
 
-- **缓存优先** — 共享前缀 → 子 agent fork → 全部命中缓存读取
-- **多模型兼容** — ProviderProfile 模式，支持 DeepSeek / OpenAI / Anthropic / Google 等
-- **双语言优化** — 自动检测模型家族 → 自动选择提示词语言（token 经济学）
-- **TUI + VSCode + Web + Desktop** — 同构架构
-- **开放插件系统** — 插件 SDK (MIT) 让第三方轻松扩展
+## 定位
 
-## 项目结构
+ExtendAI Lab CLI 是 [Linxira OS](https://github.com/Linxira-OS) 生态中的 AI 开发层，与 [Linxira Pulse](https://github.com/Linxira-OS/linxira-pulse)（系统级 AI 运行时）协同工作。
+
+**关键设计哲学**：
+- **Plugin-Natured** — 插件不是附加功能，是整个架构的核心。任何核心组件都可以在运行时被插件替换
+- **Runtime-First** — 一切在运行时决定
+- **Cache-First** — 多 Agent 共享前缀 → KV 缓存命中 → 边际成本递减
+- **Invasive Allowed** — 插件可以侵入性修改任意核心组件
+- **Multi-LLM Native** — 以多模型支持为原生设计
+
+## 模块结构
 
 ```
-extendai-lab-cli/
-├── LICENSE                        ← AGPL v3（覆盖全仓库默认）
-├── packages/
-│   ├── core/                      ← AGPL v3
-│   │   ├── src/                   CLI 核心（TUI / Agent 循环 / 工具链）
-│   │   └── test/
-│   ├── rust-daemon/               ← AGPL v3
-│   │   └── src/                   Rust 后台（MCP 池 / 缓存管理 / 状态持久化）
-│   ├── plugin-sdk/                ← MIT
-│   │   ├── LICENSE                MIT 许可证覆盖此包
-│   │   ├── src/                   插件开发工具包（类型定义 / Hook API）
-│   │   └── test/
-└── docs/
+packages/
+├── kernel/   @extendai/kernel  核心引擎：Session / Context / Provider / Tool
+├── plugin/   @extendai/plugin  插件系统：Hooks / Registry / SDK
+├── agent/    @extendai/agent   Agent 系统：Orchestrator / SubAgent / Council
+├── tui/      @extendai/tui     终端 UI：组件 / 命令 / 主题
+└── cli/      @extendai/cli     CLI 入口：依赖注入组装
 ```
 
-## 双许可证策略
+## 构建
 
-| 模块 | 许可证 | 说明 |
-|------|--------|------|
-| `packages/core/` | AGPL v3 | 核心 CLI — 修改须开源 |
-| `packages/rust-daemon/` | AGPL v3 | 后台服务 — 修改须开源 |
-| `packages/plugin-sdk/` | **MIT** | 插件 SDK — 可自由开发闭源/开源插件 |
-| 第三方插件 | 自选 | 插件开发者自选许可证，不受 AGPL 限制 |
+```bash
+# 安装依赖
+npm install
 
-## 阶段路线
+# 类型检查（ts-go）
+npm run typecheck
 
-- **阶段 1** — ProviderProfile 多模型 + 共享 Context/Fork 机制
-- **阶段 2** — Rust 后台 daemon（MCP 连接池 + 缓存 + 状态管理）
-- **阶段 3** — 插件系统 + 扩展子 Agent 角色
-- **阶段 4** — VSCode 扩展 / Web UI / Desktop
+# 开发运行
+npm run dev
+```
+
+使用 **TypeScript Go 原生编译器**（`@typescript/native-preview`）进行构建，即微软 TypeScript 7.0 的 Go 移植版。
+
+## 许可证
+
+AGPL-3.0
+
+---
+
+> 完整架构设计见 `DESIGN.md`（不在 git 追踪中）
