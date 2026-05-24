@@ -1,0 +1,16 @@
+{
+  "name": "@extendai/cli",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "ExtendAI Lab - CLI entry point, dependency injection wiring",
+  "main": "../../../dist/cli/src/index.js",
+  "types": "../../../dist/cli/src/index.d.ts",
+  "bin": {
+    "extendai": "../../../dist/cli/src/index.js"
+  },
+  "scripts": {
+    "typecheck": "tsgo --project ../../tsconfig.json",
+    "dev": "node --experimental-strip-types src/index.ts",
+    "build": "tsgo --project ../../tsconfig.json"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "ESNext.Disposable"],
+    "types": ["node"],
+    "outDir": "dist",
+    "rootDir": "packages",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "composite": true,
+    "paths": {
+      "@extendai/kernel": ["./packages/kernel/src"],
+      "@extendai/plugin": ["./packages/plugin/src"],
+      "@extendai/agent": ["./packages/agent/src"],
+      "@extendai/tui": ["./packages/tui/src"],
+      "@extendai/cli": ["./packages/cli/src"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "studying"]
+}

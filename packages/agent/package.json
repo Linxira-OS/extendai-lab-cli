@@ -1,0 +1,12 @@
+{
+  "name": "@extendai/agent",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "ExtendAI Lab - Agent system: orchestrator, subagent, council, templates",
+  "main": "../../../dist/agent/src/index.js",
+  "types": "../../../dist/agent/src/index.d.ts",
+  "scripts": {
+    "typecheck": "tsgo --project ../../tsconfig.json",
+    "build": "tsgo --project ../../tsconfig.json"
+  }
+}

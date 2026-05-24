@@ -1,0 +1,28 @@
+{
+  "name": "extendai-lab-cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Multi-LLM agent workflow CLI — plugin-native, cache-first, modular architecture",
+  "workspaces": [
+    "packages/kernel",
+    "packages/plugin",
+    "packages/agent",
+    "packages/tui",
+    "packages/cli"
+  ],
+  "bin": {
+    "extendai": "dist/cli/src/index.js"
+  },
+  "scripts": {
+    "build": "tsgo",
+    "typecheck": "tsgo",
+    "dev": "node --experimental-strip-types packages/cli/src/index.ts",
+    "clean": "rm -rf packages/*/dist"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@typescript/native-preview": "^7.0.0-dev.20260524.1",
+    "typescript": "^6.0.3"
+  }
+}

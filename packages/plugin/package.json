@@ -1,0 +1,12 @@
+{
+  "name": "@extendai/plugin",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "ExtendAI Lab - Plugin system: hooks, registry, SDK, sandbox",
+  "main": "../../../dist/plugin/src/index.js",
+  "types": "../../../dist/plugin/src/index.d.ts",
+  "scripts": {
+    "typecheck": "tsgo --project ../../tsconfig.json",
+    "build": "tsgo --project ../../tsconfig.json"
+  }
+}

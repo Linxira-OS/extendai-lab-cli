@@ -1,0 +1,12 @@
+{
+  "name": "@extendai/kernel",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "ExtendAI Lab - Core engine: session, context, provider, tool, message",
+  "main": "../../../dist/kernel/src/index.js",
+  "types": "../../../dist/kernel/src/index.d.ts",
+  "scripts": {
+    "typecheck": "tsgo --project ../../tsconfig.json",
+    "build": "tsgo --project ../../tsconfig.json"
+  }
+}

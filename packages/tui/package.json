@@ -1,0 +1,12 @@
+{
+  "name": "@extendai/tui",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "ExtendAI Lab - Terminal UI: components, commands, themes",
+  "main": "../../../dist/tui/src/index.js",
+  "types": "../../../dist/tui/src/index.d.ts",
+  "scripts": {
+    "typecheck": "tsgo --project ../../tsconfig.json",
+    "build": "tsgo --project ../../tsconfig.json"
+  }
+}
