@@ -126,6 +126,7 @@ export type ChatMessage =
       pending: boolean;
     }
   | { kind: "status"; text: string }
+  | { kind: "warning"; id: string; text: string; severity: "low" | "high" }
   | { kind: "error"; message: string; id: string; recoverable?: boolean };
 
 export type PendingConfirm = {
@@ -223,6 +224,7 @@ export type Settings = {
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   subagentModels?: Record<string, "flash" | "pro">;
+  showSystemEvents?: boolean;
   version: string;
 };
 
@@ -808,6 +810,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           editor: ev.editor,
           webSearchEngine: ev.webSearchEngine,
           subagentModels: ev.subagentModels,
+          showSystemEvents: ev.showSystemEvents,
           version: ev.version,
         },
       };
@@ -1046,6 +1049,21 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "status":
       return state;
+    case "warning":
+      // High-severity only — eventize already drops "low". Inline divider only.
+      if (ev.severity !== "high") return state;
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "warning",
+            id: `w-${ev.id}`,
+            text: ev.text,
+            severity: ev.severity,
+          },
+        ],
+      };
     default:
       return state;
   }
@@ -2030,6 +2048,16 @@ function TabRuntime({
                           >
                             <I.x size={14} />
                           </button>
+                        </div>
+                      );
+                    }
+                    if (m.kind === "warning") {
+                      if (state.settings?.showSystemEvents === false) return null;
+                      return (
+                        <div key={m.id} className="sys-event-row" title={m.text}>
+                          <span className="line" />
+                          <span className="label">{m.text}</span>
+                          <span className="line" />
                         </div>
                       );
                     }

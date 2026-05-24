@@ -275,6 +275,7 @@ export type SettingsEvent = {
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
   subagentModels?: Record<string, "flash" | "pro">;
+  showSystemEvents?: boolean;
   version: string;
 };
 
@@ -308,6 +309,7 @@ export type SettingsPatch = {
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
   subagentModels?: Record<string, "flash" | "pro">;
+  showSystemEvents?: boolean;
 };
 
 export type QQConfigPatch = {
@@ -399,6 +401,15 @@ export type StatusEvent = {
   text: string;
 };
 
+export type WarningEvent = {
+  type: "warning";
+  id: number;
+  ts: string;
+  turn: number;
+  text: string;
+  severity: "low" | "high";
+};
+
 export type KernelErrorEvent = {
   type: "error";
   id: number;
@@ -444,6 +455,7 @@ export type IncomingEvent = { tabId?: string } & (
   | ToolIntentEvent
   | ToolResultEvent
   | StatusEvent
+  | WarningEvent
   | KernelErrorEvent
   | RetryResultEvent
   | BtwResultEvent
