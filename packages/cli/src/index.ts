@@ -59,9 +59,13 @@ async function main(): Promise<void> {
     extendai --init-git          Init git repo + .gitignore in current directory
 
   Configuration (priority: env > config file > defaults):
-    EXTENDAI_API_KEY   API key (required)
+    EXTENDAI_API_KEY   API key (required for remote; localhost/LAN IPs auto-skip)
     EXTENDAI_BASE_URL  API base URL (default: https://api.openai.com/v1)
     EXTENDAI_MODEL     Model name (default: gpt-4o)
+
+  Local providers:
+    LM Studio:  set EXTENDAI_BASE_URL=http://192.168.x.x:1234/v1, key = model ID
+    Ollama:     set EXTENDAI_BASE_URL=http://localhost:11434/v1, key = ollama
 
   Config file: ~/.extendai/config.json
     `);
@@ -114,11 +118,8 @@ async function main(): Promise<void> {
     config.provider.model = args[modelIdx + 1];
   }
 
-  // ── Validate API key (skip for known local providers) ──
-  const isLocalProvider =
-    config.provider.baseUrl.includes('localhost') ||
-    config.provider.baseUrl.includes('127.0.0.1') ||
-    config.provider.baseUrl.includes('0.0.0.0');
+  // ── Validate API key (skip for local/LAN providers) ──
+  const isLocalProvider = isPrivateUrl(config.provider.baseUrl);
 
   if (!config.provider.apiKey && !isLocalProvider) {
     console.error('');
@@ -132,7 +133,9 @@ async function main(): Promise<void> {
     console.error('    extendai --init');
     console.error('    Then edit ~/.extendai/config.json and add your apiKey');
     console.error('');
-    console.error('  Local provider detected? Set EXTENDAI_BASE_URL and EXTENDAI_API_KEY=ollama');
+    console.error('  Local provider (Ollama/LM Studio)? Set the model as API key:');
+    console.error('    $env:EXTENDAI_API_KEY = $env:EXTENDAI_MODEL    # LM Studio: key = model ID');
+    console.error('    $env:EXTENDAI_API_KEY = "ollama"               # Ollama: any dummy value');
     console.error('');
     process.exit(1);
   }
@@ -153,6 +156,34 @@ async function main(): Promise<void> {
   // ── Start chat ────────────────────────────────────────
 
   await startChat(config, worktree);
+}
+
+/**
+ * Check if a URL points to a local/private network address.
+ * Covers: localhost, 127.x, 10.x, 192.168.x, 172.16-31.x, ::1, 0.0.0.0
+ */
+function isPrivateUrl(url: string): boolean {
+  const hostname = url
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .split(':')[0]
+    .toLowerCase();
+
+  // Named local addresses
+  if (hostname === 'localhost' || hostname === '0.0.0.0' || hostname === '::1' || hostname === '[::1]') {
+    return true;
+  }
+
+  // IPv4 private ranges
+  if (/^(127\.\d{1,3}\.)/.test(hostname)) return true;
+  if (/^(10\.\d{1,3}\.)/.test(hostname)) return true;
+  if (/^(192\.168\.)/.test(hostname)) return true;
+  if (/^(172\.(1[6-9]|2\d|3[01])\.)/.test(hostname)) return true;
+
+  // Unix socket
+  if (hostname.endsWith('.sock')) return true;
+
+  return false;
 }
 
 main().catch((e) => {
