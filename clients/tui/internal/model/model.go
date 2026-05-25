@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/ipc"
+	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/protocol"
+	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/renderer"
 	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/theme"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,9 +20,8 @@ type MsgServerStatus struct {
 	Error     string
 }
 
-type MsgStreamChunk struct {
-	Content string
-	Done    bool
+type MsgRenderCommand struct {
+	Command *protocol.RenderCommand
 }
 
 type MsgError struct {
@@ -29,28 +31,25 @@ type MsgError struct {
 // ─── Model ──────────────────────────────────────────────────
 
 type Model struct {
-	// Chat state
-	messages   []Message
-	input      string
-	streamBuf  strings.Builder
+	// Render state from TS
+	renderCmd *protocol.RenderCommand
+
+	// Local input state (for low-latency typing)
+	input string
+	mode  Mode
 
 	// Server connection
 	serverConnected bool
 	serverError     string
 
-	// Viewport for scrolling message history
+	// Viewport for scrolling
 	viewport viewport.Model
 
-	// Mode
-	mode Mode
+	// IPC client
+	client *ipc.Client
 
-	// Ready flag (after first render)
+	// Ready flag
 	ready bool
-}
-
-type Message struct {
-	Role    string // "user" | "assistant" | "system" | "error"
-	Content string
 }
 
 type Mode int
@@ -61,19 +60,16 @@ const (
 	ModeCommand
 )
 
-func New() Model {
+// ─── Constructor ────────────────────────────────────────────
+
+func New(client *ipc.Client) Model {
 	vp := viewport.New(80, 20)
 	vp.Style = lipgloss.NewStyle().Padding(0, 1)
 
 	return Model{
-		messages: []Message{
-			{
-				Role:    "system",
-				Content: "Welcome to ExtendAI Lab. Type /help for commands.",
-			},
-		},
-		viewport: vp,
 		mode:     ModeNormal,
+		viewport: vp,
+		client:   client,
 	}
 }
 
@@ -116,37 +112,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case MsgServerStatus:
 		m.serverConnected = msg.Connected
 		m.serverError = msg.Error
-		if !msg.Connected {
-			m.messages = append(m.messages, Message{
-				Role:    "error",
-				Content: "Server not available: " + msg.Error,
-			})
-		} else {
-			m.messages = append(m.messages, Message{
-				Role:    "system",
-				Content: "Connected to server.",
-			})
+		// Apply theme overrides if present in render command
+		if m.renderCmd != nil && m.renderCmd.Theme != nil && m.renderCmd.Theme.Colors != nil {
+			theme.ApplyThemeOverrides(m.renderCmd.Theme.Colors)
 		}
 		m.viewport.GotoBottom()
 		return m, nil
 
-	case MsgStreamChunk:
-		m.streamBuf.WriteString(msg.Content)
-		if msg.Done {
-			m.messages = append(m.messages, Message{
-				Role:    "assistant",
-				Content: m.streamBuf.String(),
-			})
-			m.streamBuf.Reset()
-			m.viewport.GotoBottom()
+	case MsgRenderCommand:
+		m.renderCmd = msg.Command
+		// Apply theme overrides
+		if msg.Command.Theme != nil && msg.Command.Theme.Colors != nil {
+			theme.ApplyThemeOverrides(msg.Command.Theme.Colors)
 		}
+		// Auto-scroll to bottom for new content
+		m.viewport.GotoBottom()
 		return m, nil
 
 	case MsgError:
-		m.messages = append(m.messages, Message{
-			Role:    "error",
-			Content: msg.Err,
-		})
+		m.renderCmd = &protocol.RenderCommand{
+			Components: []protocol.Component{
+				{
+					Type: "message",
+					Props: map[string]interface{}{
+						"role":    "error",
+						"content": msg.Err,
+					},
+				},
+			},
+		}
 		m.viewport.GotoBottom()
 		return m, nil
 	}
@@ -190,15 +184,13 @@ func (m Model) handleInsertMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if input == "" {
 			return m, nil
 		}
-		// Add user message
-		m.messages = append(m.messages, Message{
-			Role:    "user",
-			Content: input,
-		})
+		// Send to TS via IPC
+		if m.client != nil {
+			m.client.SendMessage(input)
+		}
 		m.input = ""
 		m.mode = ModeNormal
 		m.viewport.GotoBottom()
-		// TODO: send to server via IPC
 	case tea.KeyBackspace, tea.KeyDelete:
 		if len(m.input) > 0 {
 			m.input = m.input[:len(m.input)-1]
@@ -216,10 +208,19 @@ func (m Model) handleCommandMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input = ""
 	case tea.KeyEnter:
 		cmd := strings.TrimSpace(strings.TrimPrefix(m.input, "/"))
-		m.messages = append(m.messages, Message{
-			Role:    "system",
-			Content: m.execCommand(cmd),
-		})
+		result := m.execCommand(cmd)
+		// Show command result as system message via render command
+		m.renderCmd = &protocol.RenderCommand{
+			Components: []protocol.Component{
+				{
+					Type: "message",
+					Props: map[string]interface{}{
+						"role":    "system",
+						"content": result,
+					},
+				},
+			},
+		}
 		m.input = ""
 		m.mode = ModeNormal
 		m.viewport.GotoBottom()
@@ -255,7 +256,7 @@ Modes:
   g/G         Top/bottom
   :           Command mode`
 	case "clear":
-		m.messages = []Message{}
+		m.renderCmd = nil
 		return "Conversation cleared."
 	case "model":
 		if len(args) > 1 {
@@ -276,97 +277,93 @@ func (m Model) View() string {
 		return "Initializing..."
 	}
 
+	width := theme.TermWidth
+	if width < 40 {
+		width = 40
+	}
+
+	// Start with the RenderCommand rendering as the base
+	// Then inject local interactive elements (input bar, mode indicator, status bar)
+
 	var b strings.Builder
 
-	// Header bar
-	statusIcon := "●"
-	statusColor := theme.Error
-	if m.serverConnected {
-		statusIcon = "●"
-		statusColor = theme.Success
+	// ── Header ──
+	statusIcon := lipgloss.NewStyle().Foreground(theme.Colors.Success).Render("●")
+	if !m.serverConnected {
+		statusIcon = lipgloss.NewStyle().Foreground(theme.Colors.Error).Render("●")
 	}
-	headerText := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon) + " ExtendAI Lab"
-	b.WriteString(theme.HeaderStyle.Width(theme.TermWidth).Render(headerText))
+	headerText := fmt.Sprintf("%s ExtendAI Lab", statusIcon)
+	b.WriteString(theme.HeaderStyle.Width(width).Render(headerText))
 	b.WriteString("\n")
 
-	// Mode indicator
+	// ── Mode badge ──
 	modeText := "NORMAL"
-	modeColor := theme.Primary
+	modeColor := theme.Colors.Primary
 	switch m.mode {
 	case ModeInsert:
 		modeText = "INSERT"
-		modeColor = theme.Secondary
+		modeColor = theme.Colors.Secondary
 	case ModeCommand:
 		modeText = "CMD"
-		modeColor = theme.Accent
+		modeColor = theme.Colors.Accent
 	}
 	modeBadge := lipgloss.NewStyle().
 		Background(modeColor).
-		Foreground(lipgloss.Color("#000000")).
+		Foreground(theme.Colors.Base).
 		Padding(0, 1).
 		Render(modeText)
-	b.WriteString(theme.DividerStyle.Render(modeBadge))
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(theme.Colors.Muted).
+		Render(strings.Repeat("─", 2)))
+	b.WriteString(modeBadge)
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(theme.Colors.Muted).
+		Render(strings.Repeat("─", width-2-len(modeText)-2)))
 	b.WriteString("\n")
 
-	// Chat content in viewport
-	var content strings.Builder
-	for i, msg := range m.messages {
-		if i > 0 {
-			content.WriteString("\n")
-		}
-		switch msg.Role {
-		case "user":
-			content.WriteString(theme.UserMsgStyle.Render("┌ You:"))
-			content.WriteString("\n")
-			content.WriteString(theme.ChatStyle.Render(msg.Content))
-			content.WriteString("\n")
-			content.WriteString(theme.UserMsgStyle.Render("└"))
-		case "assistant":
-			content.WriteString(theme.AssistantMsgStyle.Render("┌ Assistant:"))
-			content.WriteString("\n")
-			content.WriteString(theme.ChatStyle.Render(msg.Content))
-			content.WriteString("\n")
-			content.WriteString(theme.AssistantMsgStyle.Render("└"))
-		case "error":
-			content.WriteString(theme.ErrorStyle.Render("✗ " + msg.Content))
-		case "system":
-			content.WriteString(theme.StatusStyle.Render(msg.Content))
-		}
+	// ── Content area (render TS components) ──
+	if m.renderCmd != nil && len(m.renderCmd.Components) > 0 {
+		rendered := renderer.RenderAllComponents(m.renderCmd, m.viewport.Width)
+		rendered = renderer.RenderMarkdown(rendered, m.viewport.Width-2)
+		m.viewport.SetContent(rendered)
+	} else {
+		m.viewport.SetContent(theme.StatusStyle.Render("Welcome to ExtendAI Lab. Type /help for commands."))
 	}
-	m.viewport.SetContent(content.String())
 	b.WriteString(m.viewport.View())
 	b.WriteString("\n")
 
-	// Input bar
+	// ── Input bar ──
 	inputPlaceholder := "Press 'i' to type, ':' for commands, ESC for normal"
 	inputContent := m.input
 	if m.mode == ModeNormal && inputContent == "" {
 		inputContent = inputPlaceholder
 	}
-	inputStyle := theme.InputStyle.
-		Width(theme.TermWidth - 4)
+	inputBox := theme.InputStyle.Width(width - 4)
 	if m.mode == ModeInsert {
-		inputStyle = inputStyle.BorderForeground(theme.Secondary)
+		inputBox = inputBox.BorderForeground(theme.Colors.Secondary)
 	} else if m.mode == ModeCommand {
-		inputStyle = inputStyle.BorderForeground(theme.Accent)
+		inputBox = inputBox.BorderForeground(theme.Colors.Accent)
 	}
 	prompt := "> "
 	if m.mode == ModeCommand {
 		prompt = ":"
 	}
-	b.WriteString(inputStyle.Render(prompt + inputContent))
+	b.WriteString(inputBox.Render(prompt + inputContent))
 	b.WriteString("\n")
 
-	// Footer
+	// ── Footer status bar ──
 	modelInfo := "free:QwQ-32B"
-	msgCount := len(m.messages)
-	tokens := "-"
+	msgCount := "? msgs"
+	statusRight := "connected"
+	if !m.serverConnected {
+		statusRight = "disconnected"
+	}
 	footerText := lipgloss.JoinHorizontal(lipgloss.Center,
-		lipgloss.NewStyle().Width(theme.TermWidth/3).Align(lipgloss.Left).Render(modelInfo),
-		lipgloss.NewStyle().Width(theme.TermWidth/3).Align(lipgloss.Center).Render(fmt.Sprintf("%d msgs", msgCount)),
-		lipgloss.NewStyle().Width(theme.TermWidth/3).Align(lipgloss.Right).Render(tokens),
+		lipgloss.NewStyle().Width(width/3).Align(lipgloss.Left).Render(modelInfo),
+		lipgloss.NewStyle().Width(width/3).Align(lipgloss.Center).Render(msgCount),
+		lipgloss.NewStyle().Width(width/3).Align(lipgloss.Right).Render(statusRight),
 	)
-	b.WriteString(theme.FooterStyle.Width(theme.TermWidth).Render(footerText))
+	b.WriteString(theme.FooterStyle.Width(width).Render(footerText))
 
 	return b.String()
 }
