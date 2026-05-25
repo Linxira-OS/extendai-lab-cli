@@ -91,6 +91,27 @@ func (c *Client) ReadMessage() (interface{}, error) {
 		}
 		return &resp, nil
 
+	case "ai_status":
+		var msg protocol.AIStatusMsg
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, fmt.Errorf("parse ai_status: %w", err)
+		}
+		return &msg, nil
+
+	case "stream_chunk":
+		var chunk protocol.StreamChunk
+		if err := json.Unmarshal(data, &chunk); err != nil {
+			return nil, fmt.Errorf("parse stream_chunk: %w", err)
+		}
+		return &chunk, nil
+
+	case "status_update":
+		var update protocol.StatusUpdate
+		if err := json.Unmarshal(data, &update); err != nil {
+			return nil, fmt.Errorf("parse status_update: %w", err)
+		}
+		return &update, nil
+
 	default:
 		return nil, fmt.Errorf("unknown message type: %s", envelope.Type)
 	}

@@ -1,5 +1,17 @@
 package protocol
 
+// ─── AI Status ──────────────────────────────────────────────
+
+// AIStatus represents the current AI working state.
+type AIStatus string
+
+const (
+	AIIdle     AIStatus = "idle"
+	AIThinking AIStatus = "thinking"  // model is reasoning (thinking tokens)
+	AIStreaming AIStatus = "streaming" // model is generating response
+	AIError    AIStatus = "error"
+)
+
 // ─── RenderCommand ──────────────────────────────────────────
 
 // RenderCommand is the top-level message from TS to Go TUI.
@@ -24,6 +36,53 @@ type LayoutSpec struct {
 	Direction   string   `json:"direction"`             // "vertical" | "horizontal"
 	SplitRatios []float64 `json:"splitRatios,omitempty"`
 	Focus       string   `json:"focus,omitempty"`
+}
+
+// ─── AI Status Message ─────────────────────────────────────
+
+// AIStatusMsg is pushed by TS when AI working state changes.
+type AIStatusMsg struct {
+	Type   AIStatus `json:"type"`   // "ai_status"
+	Status AIStatus `json:"status"` // idle | thinking | streaming | error
+	Model  string   `json:"model,omitempty"`
+	Label  string   `json:"label,omitempty"` // e.g. "thinking…" / "generating…"
+}
+
+// ─── Stream Chunk ───────────────────────────────────────────
+
+// StreamChunk is a partial message content from TS during streaming.
+type StreamChunk struct {
+	Type    string `json:"type"`    // "stream_chunk"
+	Content string `json:"content"`
+	Done    bool   `json:"done"`
+	Error   string `json:"error,omitempty"`
+}
+
+// ─── Status Update ──────────────────────────────────────────
+
+// StatusUpdate contains environment status pushed by TS.
+type StatusUpdate struct {
+	Type        string         `json:"type"`                  // "status_update"
+	Connected   bool           `json:"connected"`
+	LSPCount    int            `json:"lspCount,omitempty"`
+	MCPCount    int            `json:"mcpCount,omitempty"`
+	MCPError    bool           `json:"mcpError,omitempty"`
+	Directory   string         `json:"directory,omitempty"`
+	Model       string         `json:"model,omitempty"`
+	Permissions int            `json:"permissions,omitempty"`
+	LSPList     []LSPStatus    `json:"lspList,omitempty"`
+	MCPList     []MCPStatus    `json:"mcpList,omitempty"`
+}
+
+type LSPStatus struct {
+	ID     string `json:"id"`
+	Root   string `json:"root"`
+	Status string `json:"status"` // "connected" | "starting" | "error"
+}
+
+type MCPStatus struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // "connected" | "failed"
 }
 
 // ─── Component ──────────────────────────────────────────────
@@ -51,6 +110,12 @@ const (
 	CompSpinner     = "spinner"
 	CompToolOutput  = "tool-output"
 	CompPanel       = "panel"
+	CompSidePanel   = "side-panel"
+	CompLSPList     = "lsp-list"
+	CompFileList    = "file-list"
+	CompTodoList    = "todo-list"
+	CompFooter      = "footer"
+	CompAIStatus    = "ai-status"
 	CompCustom      = "custom"
 )
 
@@ -119,17 +184,28 @@ type ThemeOverrides struct {
 }
 
 type ThemeColors struct {
-	Primary   string `json:"primary,omitempty"`
-	Secondary string `json:"secondary,omitempty"`
-	Accent    string `json:"accent,omitempty"`
-	Success   string `json:"success,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Warning   string `json:"warning,omitempty"`
-	Muted     string `json:"muted,omitempty"`
-	Surface   string `json:"surface,omitempty"`
-	Base      string `json:"base,omitempty"`
-	Text      string `json:"text,omitempty"`
-	TextDim   string `json:"textDim,omitempty"`
+	Primary        string `json:"primary,omitempty"`
+	Secondary      string `json:"secondary,omitempty"`
+	Accent         string `json:"accent,omitempty"`
+	Success        string `json:"success,omitempty"`
+	Error          string `json:"error,omitempty"`
+	Warning        string `json:"warning,omitempty"`
+	Info           string `json:"info,omitempty"`
+	Muted          string `json:"muted,omitempty"`
+	Text           string `json:"text,omitempty"`
+	TextSoft       string `json:"textSoft,omitempty"`
+	TextDim        string `json:"textDim,omitempty"`
+	TextUser       string `json:"textUser,omitempty"`
+	Surface        string `json:"surface,omitempty"`
+	Base           string `json:"base,omitempty"`
+	SurfacePanel   string `json:"surfacePanel,omitempty"`
+	SurfaceElement string `json:"surfaceElement,omitempty"`
+	CodeBg         string `json:"codeBg,omitempty"`
+	Selection      string `json:"selection,omitempty"`
+	Border         string `json:"border,omitempty"`
+	BorderActive   string `json:"borderActive,omitempty"`
+	BorderSubtle   string `json:"borderSubtle,omitempty"`
+	ThinkingBg     string `json:"thinkingBg,omitempty"`
 }
 
 type ThemeSpacing struct {

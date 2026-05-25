@@ -42,33 +42,28 @@ func renderMessage(c protocol.Component, ctx *RenderContext) string {
 	role, _ := c.Props["role"].(string)
 	content, _ := c.Props["content"].(string)
 
-	// Role label
-	var label string
-	var labelStyle lipgloss.Style
+	var b strings.Builder
+
+	// Role header
 	switch role {
 	case "user":
-		label = "┌ You:"
-		labelStyle = theme.UserMsgStyle
+		b.WriteString(theme.UserStyle.Render("You"))
+		b.WriteString("\n")
 	case "assistant":
-		label = "┌ Assistant:"
-		labelStyle = theme.AssistantMsgStyle
+		b.WriteString(theme.AssistantStyle.Render("Assistant"))
+		b.WriteString("\n")
 	case "system":
-		label = "──"
-		labelStyle = theme.StatusStyle
+		b.WriteString(theme.SystemStyle.Render(content))
+		return b.String()
 	case "error":
-		label = "✗ Error:"
-		labelStyle = theme.ErrorStyle
+		b.WriteString(theme.ErrorStyle.Render("✗ " + content))
+		return b.String()
 	case "tool":
-		label = "┌ Tool:"
-		labelStyle = lipgloss.NewStyle().Foreground(theme.Colors.Accent).Bold(true)
+		b.WriteString(lipgloss.NewStyle().Foreground(theme.Colors.Accent).Bold(true).Render("Tool"))
+		b.WriteString("\n")
 	default:
-		label = ">"
-		labelStyle = theme.AssistantMsgStyle
+		b.WriteRune('\n')
 	}
-
-	var b strings.Builder
-	b.WriteString(labelStyle.Render(label))
-	b.WriteString("\n")
 
 	// Render content as markdown
 	mdWidth := ctx.Width - 4
@@ -77,19 +72,6 @@ func renderMessage(c protocol.Component, ctx *RenderContext) string {
 	}
 	rendered := RenderMarkdown(content, mdWidth)
 	b.WriteString(rendered)
-
-	// Close bracket for user/assistant/tool
-	switch role {
-	case "user":
-		b.WriteString("\n")
-		b.WriteString(theme.UserMsgStyle.Render("└"))
-	case "assistant":
-		b.WriteString("\n")
-		b.WriteString(theme.AssistantMsgStyle.Render("└"))
-	case "tool":
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(theme.Colors.Accent).Render("└"))
-	}
 
 	return b.String()
 }
@@ -215,6 +197,198 @@ func renderPanel(c protocol.Component, ctx *RenderContext) string {
 	}
 
 	return style.Render(content)
+}
+
+// ─── side-panel ─────────────────────────────────────────────
+
+func renderSidePanel(c protocol.Component, ctx *RenderContext) string {
+	panelW := ctx.Width
+	if panelW < 20 {
+		panelW = 20
+	}
+
+	var b strings.Builder
+
+	// Tab bar
+	activeTab, _ := c.Props["activeTab"].(string)
+	tabsRaw, _ := c.Props["tabs"].([]interface{})
+	if len(tabsRaw) > 0 {
+		for _, t := range tabsRaw {
+			if tab, ok := t.(map[string]interface{}); ok {
+				id, _ := tab["id"].(string)
+				label, _ := tab["label"].(string)
+				if id == activeTab {
+					b.WriteString(theme.TabActiveStyle.Render(label))
+				} else {
+					b.WriteString(theme.TabInactiveStyle.Render(label))
+				}
+				b.WriteString(" ")
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Thin divider
+	div := lipgloss.NewStyle().Foreground(theme.Colors.Muted).Render(strings.Repeat("─", panelW))
+	b.WriteString(div)
+	b.WriteString("\n")
+
+	// Content area from children
+	if len(c.Children) > 0 {
+		registry := NewRegistry()
+		content := registry.RenderAll(c.Children, ctx)
+		b.WriteString(content)
+	} else if content, ok := c.Props["content"].(string); ok && content != "" {
+		b.WriteString(content)
+	} else {
+		b.WriteString(theme.SystemStyle.Render("(no data)"))
+	}
+
+	return theme.PanelStyle.Width(panelW).Render(b.String())
+}
+
+// ─── lsp-list ────────────────────────────────────────────────
+
+func renderLSPList(c protocol.Component, ctx *RenderContext) string {
+	items, _ := c.Props["items"].([]interface{})
+	if len(items) == 0 {
+		return theme.SystemStyle.Render("No diagnostics")
+	}
+
+	var b strings.Builder
+	for _, item := range items {
+		if m, ok := item.(map[string]interface{}); ok {
+			file, _ := m["file"].(string)
+			line := 0
+			if v, ok := m["line"].(float64); ok {
+				line = int(v)
+			}
+			level, _ := m["level"].(string) // "error" | "warning" | "info"
+			msg, _ := m["message"].(string)
+
+			// Level indicator
+			var levelStyle lipgloss.Style
+			var levelChar string
+			switch level {
+			case "error":
+				levelStyle = lipgloss.NewStyle().Foreground(theme.Colors.Error).Bold(true)
+				levelChar = "✗"
+			case "warning":
+				levelStyle = lipgloss.NewStyle().Foreground(theme.Colors.Warning)
+				levelChar = "!"
+			default:
+				levelStyle = lipgloss.NewStyle().Foreground(theme.Colors.TextDim)
+				levelChar = "i"
+			}
+
+			b.WriteString(levelStyle.Render(levelChar))
+			b.WriteString(" ")
+
+			// File:line
+			loc := fmt.Sprintf("%s:%d", file, line)
+			b.WriteString(lipgloss.NewStyle().Foreground(theme.Colors.TextSoft).Render(loc))
+			b.WriteString("\n")
+
+			// Message (indented)
+			msgStyle := lipgloss.NewStyle().Foreground(theme.Colors.Text)
+			b.WriteString("  " + msgStyle.Render(truncate(msg, ctx.Width-4)))
+			b.WriteString("\n")
+		}
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// ─── file-list ───────────────────────────────────────────────
+
+func renderFileList(c protocol.Component, ctx *RenderContext) string {
+	items, _ := c.Props["items"].([]interface{})
+	if len(items) == 0 {
+		return theme.SystemStyle.Render("No files")
+	}
+
+	var b strings.Builder
+	for _, item := range items {
+		if m, ok := item.(map[string]interface{}); ok {
+			path, _ := m["path"].(string)
+			status, _ := m["status"].(string) // "M" | "A" | "D" | "?" | " "
+			selected, _ := m["selected"].(bool)
+
+			prefix := " "
+			if selected {
+				prefix = "●"
+			}
+
+			var statusStyle lipgloss.Style
+			switch status {
+			case "M":
+				statusStyle = lipgloss.NewStyle().Foreground(theme.Colors.Warning).Bold(true)
+			case "A":
+				statusStyle = lipgloss.NewStyle().Foreground(theme.Colors.Success).Bold(true)
+			case "D":
+				statusStyle = lipgloss.NewStyle().Foreground(theme.Colors.Error).Bold(true)
+			case "?":
+				statusStyle = lipgloss.NewStyle().Foreground(theme.Colors.TextDim)
+			default:
+				statusStyle = lipgloss.NewStyle().Foreground(theme.Colors.TextDim)
+			}
+
+			b.WriteString(prefix)
+			b.WriteString(statusStyle.Render(status))
+			b.WriteString(" ")
+			b.WriteString(lipgloss.NewStyle().Foreground(theme.Colors.Text).Render(path))
+			b.WriteString("\n")
+		}
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// ─── todo-list ───────────────────────────────────────────────
+
+func renderTodoList(c protocol.Component, ctx *RenderContext) string {
+	items, _ := c.Props["items"].([]interface{})
+	if len(items) == 0 {
+		return theme.SystemStyle.Render("No tasks")
+	}
+
+	var b strings.Builder
+	for i, item := range items {
+		if m, ok := item.(map[string]interface{}); ok {
+			text, _ := m["text"].(string)
+			done, _ := m["done"].(bool)
+			priority, _ := m["priority"].(string) // "high" | "medium" | "low"
+
+			// Checkbox
+			var check string
+			if done {
+				check = "☑"
+			} else {
+				check = "☐"
+			}
+
+			// Priority indicator
+			var priorityStyle lipgloss.Style
+			switch priority {
+			case "high":
+				priorityStyle = lipgloss.NewStyle().Foreground(theme.Colors.Error)
+			case "medium":
+				priorityStyle = lipgloss.NewStyle().Foreground(theme.Colors.Warning)
+			default:
+				priorityStyle = lipgloss.NewStyle().Foreground(theme.Colors.TextDim)
+			}
+
+			prefix := priorityStyle.Render("●")
+			textStyle := lipgloss.NewStyle().Foreground(theme.Colors.Text)
+
+			b.WriteString(fmt.Sprintf("%s %s %s", prefix, check, textStyle.Render(text)))
+			if i < len(items)-1 {
+				b.WriteString("\n")
+			}
+		}
+	}
+
+	return b.String()
 }
 
 // ─── progress ───────────────────────────────────────────────

@@ -29,3 +29,6 @@ bun.lockb
 .DS_Store
 Thumbs.db
 *.log
+
+# === 本地 TUI 启动脚本（API Key 等敏感信息）===
+/run-tui.ps1

@@ -65,6 +65,10 @@ func (r *Registry) registerBuiltins() {
 	r.renderers[protocol.CompStatusBar] = renderStatusBar
 	r.renderers[protocol.CompInput] = renderInput
 	r.renderers[protocol.CompPanel] = renderPanel
+	r.renderers[protocol.CompSidePanel] = renderSidePanel
+	r.renderers[protocol.CompLSPList] = renderLSPList
+	r.renderers[protocol.CompFileList] = renderFileList
+	r.renderers[protocol.CompTodoList] = renderTodoList
 	r.renderers[protocol.CompProgress] = renderProgress
 	r.renderers[protocol.CompSpinner] = renderSpinner
 	r.renderers[protocol.CompToolOutput] = renderToolOutput

@@ -1,1 +1,4 @@
 bin/
+tests/
+__pycache__/
+*.pyc
