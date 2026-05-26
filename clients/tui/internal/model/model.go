@@ -75,6 +75,10 @@ type MsgStatusUpdate struct {
 type MsgError struct {
 	Err string
 }
+type MsgDialogSelect struct {
+	DlgType DialogType
+	Value   string
+}
 
 // ─── Model ──────────────────────────────────────────────────
 
@@ -373,6 +377,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.invalidateCache()
 		return m, nil
 
+	case MsgDialogSelect:
+		m.dialogOpen = false
+		m.activeDialog = nil
+		switch msg.DlgType {
+		case DialogPalette:
+			// Special-case /help: open help dialog instead of inserting text
+			if msg.Value == "/help" {
+				return m.openHelpDialog()
+			}
+			// Execute the selected command as slash command
+			m.input = msg.Value
+			m.prompt = "/"
+			m.focusZone = FocusInput
+			m.inputFocused = true
+			m.invalidateCache()
+			return m, nil
+		case DialogModel:
+			// Model selection
+			m.modelName = msg.Value
+			m.invalidateCache()
+			return m, nil
+		case DialogHelpType, DialogHelp:
+			m.invalidateCache()
+			return m, nil
+		default:
+			m.invalidateCache()
+			return m, nil
+		}
+
 	case MsgError:
 		m.ai.Status = protocol.AIError
 		m.ai.ErrorMsg = msg.Err
@@ -422,6 +455,11 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 // ─── Key Handler ─────────────────────────────────────────────
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// ── Global keys (work in any focus zone) ──
+	if msg.Type == tea.KeyF1 {
+		return m.openHelpDialog()
+	}
+
 	// ── Tab: cycle focus zones (unless in slash command where Tab does completion) ──
 	if msg.Type == tea.KeyTab {
 		if m.focusZone == FocusInput && m.prompt == "/" {
@@ -1619,6 +1657,13 @@ func (m *Model) renderMainContent(width int) string {
 
 	// 1. Session messages (persistent conversation)
 	if m.session != nil {
+		// Context bar: colored role-distribution segments
+		contextBar := m.renderContextBar(width)
+		if contextBar != "" {
+			contentLines = append(contentLines, contextBar)
+			contentLines = append(contentLines, "") // spacing
+		}
+
 		msgs := m.session.GetMessages()
 		for i, msg := range msgs {
 			// Determine brightness style
@@ -2023,6 +2068,114 @@ func max(a, b int) int {
 	return b
 }
 
+// ─── Context bar ───────────────────────────────────────────
+
+// renderContextBar renders a colored segmented bar showing role distribution
+// across conversation messages (system/user/assistant/tool/error).
+// Reference: opencode desktop context bar (session-context-tab.tsx).
+func (m *Model) renderContextBar(width int) string {
+	if m.session == nil {
+		return ""
+	}
+
+	type roleStats struct {
+		role  string
+		count int
+		chars int // character count as proxy for tokens
+		color lipgloss.Color
+		label string
+	}
+
+	stats := []roleStats{
+		{role: RoleSystem, color: theme.Colors.Primary, label: "sys"},
+		{role: RoleUser, color: theme.Colors.Success, label: "usr"},
+		{role: RoleAssistant, color: theme.Colors.Accent, label: "asst"},
+		{role: RoleTool, color: theme.Colors.Warning, label: "tool"},
+		{role: RoleError, color: theme.Colors.Error, label: "err"},
+	}
+	roleIndex := map[string]int{}
+	for i, s := range stats {
+		roleIndex[s.role] = i
+	}
+
+	msgs := m.session.GetMessages()
+	for _, msg := range msgs {
+		idx, ok := roleIndex[msg.Role]
+		if !ok {
+			continue
+		}
+		stats[idx].count++
+		stats[idx].chars += len(msg.Content)
+	}
+
+	// Calculate proportions
+	totalChars := 0
+	for _, s := range stats {
+		totalChars += s.chars
+	}
+	if totalChars == 0 {
+		return ""
+	}
+
+	// Render segments
+	barWidth := width - 4 // padding
+	if barWidth < 20 {
+		barWidth = 20
+	}
+
+	var segments []string
+	usedWidth := 0
+	lastSignificant := 0
+	for i, s := range stats {
+		if s.chars > 0 {
+			lastSignificant = i
+		}
+	}
+
+	for i, s := range stats {
+		if s.chars == 0 {
+			continue
+		}
+		segW := s.chars * barWidth / totalChars
+		if segW < 1 {
+			segW = 1
+		}
+		// Last significant segment takes remaining space
+		if i == lastSignificant {
+			remaining := barWidth - usedWidth
+			if remaining > segW {
+				segW = remaining
+			}
+		}
+		if segW < 1 {
+			segW = 1
+		}
+		if usedWidth+segW > barWidth {
+			segW = barWidth - usedWidth
+		}
+
+		pct := s.chars * 100 / totalChars
+		block := lipgloss.NewStyle().
+			Foreground(s.color).
+			Render(strings.Repeat("█", segW))
+		countStr := lipgloss.NewStyle().
+			Foreground(s.color).
+			Render(fmt.Sprintf("%s %d%%", s.label, pct))
+		segments = append(segments, block+countStr)
+		usedWidth += segW
+		if usedWidth >= barWidth {
+			break
+		}
+	}
+
+	if len(segments) == 0 {
+		return ""
+	}
+
+	bar := strings.Join(segments, " ")
+	return bar
+}
+
 // ─── Dialog helpers ─────────────────────────────────────────
 
 // openCommandPalette opens the command palette dialog (Ctrl+P).
@@ -2035,15 +2188,11 @@ func (m Model) openCommandPalette() (tea.Model, tea.Cmd) {
 		{Title: "Exit", Description: "Quit ExtendAI Lab", Category: "Commands", Value: "/exit"},
 		{Title: "Switch model", Description: "Choose a different AI model", Category: "Models", Value: "/model"},
 	}
-	ds := NewDialogSelect("Command Palette", items, 15,
-		func(item DialogItem) (tea.Model, tea.Cmd) {
-			m.input = item.Value
-			m.prompt = "/"
-			m.focusZone = FocusInput
-			m.dialogOpen = false
-			m.activeDialog = nil
-			m.invalidateCache()
-			return m, nil
+	ds := NewDialogSelect(DialogPalette, "Command Palette", items, 15,
+		func(item DialogItem) tea.Cmd {
+			return func() tea.Msg {
+				return MsgDialogSelect{DlgType: DialogPalette, Value: item.Value}
+			}
 		},
 	)
 	m.activeDialog = ds
@@ -2061,16 +2210,24 @@ func (m Model) openModelDialog() (tea.Model, tea.Cmd) {
 		{Title: "Claude 3.5 Sonnet", Description: "Anthropic flagship", Category: "Pro", Value: "claude-3.5-sonnet"},
 		{Title: "Local (LM Studio)", Description: "Local inference", Category: "Local", Value: "local"},
 	}
-	ds := NewDialogSelect("Select Model", items, 15,
-		func(item DialogItem) (tea.Model, tea.Cmd) {
-			m.modelName = item.Value
-			m.dialogOpen = false
-			m.activeDialog = nil
-			m.invalidateCache()
-			return m, nil
+	ds := NewDialogSelect(DialogModel, "Select Model", items, 15,
+		func(item DialogItem) tea.Cmd {
+			return func() tea.Msg {
+				return MsgDialogSelect{DlgType: DialogModel, Value: item.Value}
+			}
 		},
 	)
 	m.activeDialog = ds
+	m.dialogOpen = true
+	m.invalidateCache()
+	return m, nil
+}
+
+// openHelpDialog opens the Help dialog (F1).
+func (m Model) openHelpDialog() (tea.Model, tea.Cmd) {
+	hdlg := NewHelpDialog()
+	hdlg.height = m.bodyHeight(theme.TermHeight) // use most of the body height
+	m.activeDialog = hdlg
 	m.dialogOpen = true
 	m.invalidateCache()
 	return m, nil

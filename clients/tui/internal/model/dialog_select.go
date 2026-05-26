@@ -35,6 +35,7 @@ type DialogItem struct {
 
 // DialogSelect is a generic list selection dialog.
 type DialogSelect struct {
+	dlgType     DialogType
 	title       string
 	items       []DialogItem
 	filtered    []int   // indices into items (after filtering)
@@ -47,12 +48,13 @@ type DialogSelect struct {
 	width       int
 	height      int
 
-	onSelect func(DialogItem) (tea.Model, tea.Cmd) // returns the new model + cmd
+	onSelect func(DialogItem) tea.Cmd // the action to execute on selection
 }
 
 // NewDialogSelect creates a new DialogSelect.
-func NewDialogSelect(title string, items []DialogItem, maxVisible int, onSelect func(DialogItem) (tea.Model, tea.Cmd)) *DialogSelect {
+func NewDialogSelect(dlgType DialogType, title string, items []DialogItem, maxVisible int, onSelect func(DialogItem) tea.Cmd) *DialogSelect {
 	ds := &DialogSelect{
+		dlgType:    dlgType,
 		title:      title,
 		items:      items,
 		cursor:     0,
@@ -69,7 +71,7 @@ func NewDialogSelect(title string, items []DialogItem, maxVisible int, onSelect 
 
 // ─── Dialog interface ─────────────────────────────────────────
 
-func (d *DialogSelect) Type() DialogType   { return DialogPalette }
+func (d *DialogSelect) Type() DialogType   { return d.dlgType }
 func (d *DialogSelect) Title() string       { return d.title }
 func (d *DialogSelect) Height() int         { return d.height }
 
@@ -212,7 +214,7 @@ func (d *DialogSelect) Update(msg interface{}) (Dialog, interface{}) {
 				idx := d.filtered[d.cursor]
 				item := d.items[idx]
 				if !item.Disabled && d.onSelect != nil {
-					_, cmd := d.onSelect(item)
+					cmd := d.onSelect(item)
 					return d, cmd
 				}
 			}

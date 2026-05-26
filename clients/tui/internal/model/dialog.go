@@ -23,13 +23,14 @@ import (
 type DialogType string
 
 const (
-	DialogNone    DialogType = ""
-	DialogModel   DialogType = "model_list"
-	DialogHelp    DialogType = "help"
-	DialogStatus  DialogType = "status"
-	DialogSession DialogType = "session_list"
-	DialogPalette DialogType = "command_palette"
-	DialogTheme   DialogType = "theme_list"
+	DialogNone     DialogType = ""
+	DialogModel    DialogType = "model_list"
+	DialogHelp     DialogType = "help"
+	DialogHelpType DialogType = "help_dialog" // F1 help overlay
+	DialogStatus   DialogType = "status"
+	DialogSession  DialogType = "session_list"
+	DialogPalette  DialogType = "command_palette"
+	DialogTheme    DialogType = "theme_list"
 	DialogProvider DialogType = "provider_list"
 )
 
