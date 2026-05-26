@@ -169,6 +169,7 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 		viewport: vp,
 		client:   client,
 		apiClient: aiClient,
+		panelMode: "auto", // always auto-show when wide enough
 		rightTabIDs: []string{"lsp", "files", "todo", "session"},
 		activeRightTab: "session",
 		panelSections: map[string]bool{
@@ -215,7 +216,8 @@ func (m Model) Init() tea.Cmd {
 // ─── Update ──────────────────────────────────────────────────
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// ── When a dialog is active, route all messages to the dialog ──
+	// ── When a dialog is active, route keyboard to dialog,
+	//    but DO NOT block background processing (stream chunks, AI status, etc.)
 	if m.dialogOpen && m.activeDialog != nil {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
@@ -231,16 +233,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.invalidateCache()
 				return m, nil
 			}
-			// Re-query dialog state: if it returned a close signal via its own logic
 			m.invalidateCache()
 			return m, nil
 		case tea.WindowSizeMsg:
 			// Pass resize through so dialogs can react
-			// but don't break the overlay
 			m.handleResize(msg)
 			return m, nil
 		default:
-			return m, nil
+			// CRITICAL: Non-keyboard messages (MsgStreamChunk, MsgAIStatus,
+			// MsgRenderCommand, MsgServerStatus, MsgError, etc.) must still
+			// be processed so background AI streaming continues.
+			// Dialog is a visual overlay, NOT a processing blocker.
+			break // fall through to normal processing
 		}
 	}
 
@@ -887,13 +891,9 @@ func (m *Model) extractPanelData() {
 	}
 	for _, comp := range m.renderCmd.Components {
 		if comp.Type == protocol.CompSidePanel {
-			// Auto-enable panel only if user hasn't explicitly hidden it
-			if m.panelMode == "" {
-				m.panelMode = "auto"
-			}
 			m.panelRenderCmd = &comp
 
-			// Extract tab IDs
+			// Extract tab IDs (from TS server side-panel component)
 			if tabsRaw, ok := comp.Props["tabs"].([]interface{}); ok {
 				var ids []string
 				for _, t := range tabsRaw {
@@ -903,10 +903,8 @@ func (m *Model) extractPanelData() {
 						}
 					}
 				}
-				m.rightTabIDs = ids
-				// Set default active tab
-				if m.activeRightTab == "" && len(ids) > 0 {
-					m.activeRightTab = ids[0]
+				if len(ids) > 0 {
+					m.rightTabIDs = ids
 				}
 				// Validate active tab still exists
 				valid := false
@@ -923,10 +921,8 @@ func (m *Model) extractPanelData() {
 			return
 		}
 	}
-	// No side-panel found → hide it
-	if m.panelMode == "" {
-		m.panelMode = "hide"
-	}
+	// No side-panel from TS — that's fine, local sections still render.
+	// Don't auto-hide the panel.
 }
 
 // ─── Command tab completion ────────────────────────────────
@@ -1186,7 +1182,7 @@ func (m Model) execCommand(cmd string) string {
   /clear      Clear conversation
   /model      Show/set model
   /theme      Switch theme: /theme (list) or /theme <name>
-  /panel      Toggle right panel (auto/hide)
+  /panel      Cycle panel mode: auto → show → hide
   /exit       Quit
 
 Navigation (browse mode):
@@ -1198,10 +1194,18 @@ Navigation (browse mode):
   Tab         Cycle focus: main → panel → input
 
 Right panel (when panel focused):
-  h / ←       Previous tab
-  l / →       Next tab
+  h / ←       Previous section
+  l / →       Next section
+  Space       Expand/collapse current section
   j / ↓       Scroll panel down
   k / ↑       Scroll panel up
+
+Dialogs:
+  Ctrl+P      Command palette
+  Ctrl+F      Model selection
+  Ctrl+S      Session picker
+  F1          Help
+  Esc         Close dialog
 
 Focus:
   Click input  Edit input
@@ -1213,14 +1217,20 @@ Focus:
 		m.invalidateCache()
 		return "Conversation cleared."
 	case "panel":
-		if m.panelMode == "hide" {
+		switch m.panelMode {
+		case "hide":
 			m.panelMode = "auto"
 			m.invalidateCache()
-			return "Right panel: auto mode (shows when wide)."
+			return "Right panel: auto mode (shows when wide, >100 cols)."
+		case "show":
+			m.panelMode = "hide"
+			m.invalidateCache()
+			return "Right panel hidden. /panel to show."
+		default: // auto
+			m.panelMode = "show"
+			m.invalidateCache()
+			return "Right panel: always visible. /panel to hide."
 		}
-		m.panelMode = "hide"
-		m.invalidateCache()
-		return "Right panel hidden."
 	case "model":
 		if len(args) > 1 {
 			return "Model set to: " + args[1]
@@ -1246,7 +1256,7 @@ Focus:
 const (
 	panelWidthMax  = 42 // fixed right panel width (matching opencode-dev)
 	panelWidthMin  = 28
-	wideThreshold  = 120 // min terminal width for right panel auto-show
+	wideThreshold  = 100 // min terminal width for right panel auto-show
 	inputBoxHeight = 3
 	sepHeight      = 1
 )
@@ -1254,15 +1264,14 @@ const (
 // panelVisible returns true if the right panel should be shown,
 // based on terminal width and the panel mode.
 func (m *Model) panelVisible(width int) bool {
-	if m.panelMode == "hide" {
+	switch m.panelMode {
+	case "hide":
 		return false
-	}
-	if m.panelMode == "auto" {
-		// Hide if terminal is too narrow
+	case "show":
+		return true
+	default: // "auto"
 		return width >= wideThreshold
 	}
-	// Default: show when there's panel data
-	return width >= wideThreshold
 }
 
 // bodyHeight calculates the height available for the main content area.
@@ -1897,6 +1906,9 @@ func (m *Model) renderRightPanel(width int) string {
 	contentWidth := width - 4 // padding on both sides
 
 	var sectionLines []string
+
+	// ── Tab bar at top (shows all sections, highlights active) ──
+	sectionLines = append(sectionLines, m.renderPanelTabs(width-2))
 
 	// ── MCP section ──
 	{
