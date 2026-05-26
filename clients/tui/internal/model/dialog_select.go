@@ -14,6 +14,7 @@ package model
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/theme"
 	tea "github.com/charmbracelet/bubbletea"
@@ -166,12 +167,14 @@ func (d *DialogSelect) View(width, height int) string {
 
 		// Title (truncated)
 		title := item.Title
-		maxTitle := width - 8 - len(item.Subtitle)
+		subLen := utf8.RuneCountInString(item.Subtitle)
+		maxTitle := width - 8 - subLen
 		if maxTitle < 10 {
 			maxTitle = 10
 		}
-		if len(title) > maxTitle {
-			title = title[:maxTitle-1] + "…"
+		if utf8.RuneCountInString(title) > maxTitle {
+			runes := []rune(title)
+			title = string(runes[:maxTitle-1]) + "…"
 		}
 
 		lineText := prefix + title
@@ -260,7 +263,8 @@ func (d *DialogSelect) Update(msg interface{}) (Dialog, interface{}) {
 
 		case tea.KeyBackspace:
 			if len(d.filter) > 0 {
-				d.filter = d.filter[:len(d.filter)-1]
+				_, size := utf8.DecodeLastRuneInString(d.filter)
+				d.filter = d.filter[:len(d.filter)-size]
 				d.applyFilter()
 			}
 

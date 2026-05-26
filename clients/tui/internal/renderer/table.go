@@ -218,13 +218,14 @@ func padCell(text string, width int, align string) string {
 
 // truncate shortens text to maxWidth, adding "..." if truncated.
 func truncate(text string, maxWidth int) string {
-	if len(text) <= maxWidth {
+	runes := []rune(text)
+	if len(runes) <= maxWidth {
 		return text
 	}
 	if maxWidth <= 3 {
-		return text[:maxWidth]
+		return string(runes[:maxWidth])
 	}
-	return text[:maxWidth-3] + "..."
+	return string(runes[:maxWidth-3]) + "..."
 }
 
 // displayWidth returns the visual width of a string.

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/api"
 	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/ipc"
@@ -79,6 +81,10 @@ type MsgDialogSelect struct {
 	DlgType DialogType
 	Value   string
 }
+type MsgSessionSelect struct {
+	Path  string
+	New   bool
+}
 
 // ─── Model ──────────────────────────────────────────────────
 
@@ -115,6 +121,8 @@ type Model struct {
 
 	// Session tree (persistent conversation storage)
 	session *Session
+	// Startup session picker
+	sessionPickerOpen bool
 
 	// Request timing tracking (for assistant message metadata)
 	reqStart      time.Time
@@ -161,13 +169,14 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 		viewport: vp,
 		client:   client,
 		apiClient: aiClient,
-		rightTabIDs: []string{"lsp", "files", "todo"},
-		activeRightTab: "lsp",
+		rightTabIDs: []string{"lsp", "files", "todo", "session"},
+		activeRightTab: "session",
 		panelSections: map[string]bool{
-			"mcp":   true,  // expanded by default
-			"lsp":   true,
-			"todo":  false,
-			"files": false,
+			"mcp":     true,   // expanded by default
+			"lsp":     true,
+			"todo":    false,
+			"files":   false,
+			"session": true,   // expanded by default
 		},
 	}
 
@@ -178,7 +187,7 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 		m.modelURL = aiClient.BaseURL()
 	}
 
-	// Initialize session (load most recent or create new)
+	// Initialize session (load most recent or prompt selection)
 	dir := m.currentDir
 	if dir == "" {
 		dir, _ = os.Getwd()
@@ -186,7 +195,15 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 			dir = "~"
 		}
 	}
-	m.session = loadOrCreateSession(dir)
+	if session, files := loadRecentSessionOrPrompt(dir); session != nil {
+		m.session = session
+	} else if len(files) > 0 {
+		m.sessionPickerOpen = true
+		m.activeDialog = newSessionPickerDialog(files, dir)
+		m.dialogOpen = true
+	} else {
+		m.session = NewSession(dir)
+	}
 
 	return m
 }
@@ -405,6 +422,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.invalidateCache()
 			return m, nil
 		}
+
+	case MsgSessionSelect:
+		if msg.New {
+			dir := m.currentDir
+			if dir == "" {
+				dir, _ = os.Getwd()
+			}
+			m.session = NewSession(dir)
+			m.sessionPickerOpen = false
+			m.dialogOpen = false
+			m.activeDialog = nil
+			return m, nil
+		}
+		loaded, err := LoadSession(msg.Path)
+		if err != nil {
+			m.ai.Status = protocol.AIError
+			m.ai.ErrorMsg = err.Error()
+			m.session = NewSession(m.currentDir)
+		} else {
+			m.session = loaded
+		}
+		m.sessionPickerOpen = false
+		m.dialogOpen = false
+		m.activeDialog = nil
+		m.invalidateCache()
+		return m, nil
 
 	case MsgError:
 		m.ai.Status = protocol.AIError
@@ -662,7 +705,8 @@ func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyBackspace, tea.KeyDelete:
 		if len(m.input) > 0 {
-			m.input = m.input[:len(m.input)-1]
+			_, size := utf8.DecodeLastRuneInString(m.input)
+			m.input = m.input[:len(m.input)-size]
 		}
 		return m, nil
 
@@ -673,6 +717,9 @@ func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlF:
 		// Ctrl+F: open model dialog from input zone
 		return m.openModelDialog()
+
+	case tea.KeyCtrlS:
+		return m.openSessionPicker()
 
 	case tea.KeyCtrlC:
 		// Ctrl+C: clear input
@@ -749,9 +796,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseLeft:
 		// Click detection for input focus
 		// Input is at the bottom of the screen
-		// Layout: header(1) + sep(1) + viewport(vpHeight) + input(3) + footer(1)
+		// Layout: header(1) + sep(1) + viewport(vpHeight) + input(3) + footer(3)
 		headerHeight := 1
-		footerHeight := 1
+		footerHeight := 3
 		inputHeight := 3
 		sepLines := 1
 		vpHeight := theme.TermHeight - headerHeight - footerHeight - inputHeight - sepLines - 2
@@ -784,7 +831,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 // ─── Section cycling ─────────────────────────────────────────
 
-var sectionOrder = []string{"mcp", "lsp", "todo", "files"}
+var sectionOrder = []string{"mcp", "lsp", "todo", "files", "session"}
 
 func (m *Model) toggleSection(id string) {
 	if _, ok := m.panelSections[id]; ok {
@@ -956,6 +1003,7 @@ func splitInput(s string) []string {
 }
 
 // longestCommonPrefix returns the longest common prefix among strings.
+// Uses rune-aware comparison for correct UTF-8 handling.
 func longestCommonPrefix(strs []string) string {
 	if len(strs) == 0 {
 		return ""
@@ -963,15 +1011,19 @@ func longestCommonPrefix(strs []string) string {
 	if len(strs) == 1 {
 		return strs[0]
 	}
-	prefix := strs[0]
+	prefix := []rune(strs[0])
 	for i := 1; i < len(strs); i++ {
+		runes := []rune(strs[i])
 		j := 0
-		for j < len(prefix) && j < len(strs[i]) && prefix[j] == strs[i][j] {
+		for j < len(prefix) && j < len(runes) && prefix[j] == runes[j] {
 			j++
 		}
 		prefix = prefix[:j]
+		if len(prefix) == 0 {
+			return ""
+		}
 	}
-	return prefix
+	return string(prefix)
 }
 
 // ─── Invalidate cache ───────────────────────────────────────
@@ -1215,8 +1267,8 @@ func (m *Model) panelVisible(width int) bool {
 
 // bodyHeight calculates the height available for the main content area.
 func (m *Model) bodyHeight(height int) int {
-	// header(1) + sep(1) + body + input(3) + statusLine(1) + sep(1) + footer(1)
-	h := height - 1 - sepHeight - inputBoxHeight - 1 - sepHeight - 1
+	// header(1) + sep(1) + body + input(3) + statusLine(1) + sep(1) + footer(3)
+	h := height - 1 - sepHeight - inputBoxHeight - 1 - sepHeight - 3
 	if h < 5 {
 		h = 5
 	}
@@ -1369,10 +1421,6 @@ func (m Model) View() string {
 	b.WriteString(inputBox.Render(promptSymbol + " " + displayText))
 	b.WriteString("\n")
 
-	// ── Status line (model, tokens, MCP/LSP/agent counts) ──
-	b.WriteString(m.renderStatusLine(width))
-	b.WriteString("\n")
-
 	// ── Separator before footer ──
 	b.WriteString(lipgloss.NewStyle().
 		Foreground(theme.Colors.Muted).
@@ -1448,8 +1496,9 @@ func (m Model) renderHeader(mainWidth int, hasPanel bool) string {
 	if m.modelURL != "" {
 		// Truncate URL to prevent overflow
 		urlStr := m.modelURL
-		if len(urlStr) > 40 {
-			urlStr = urlStr[:37] + "..."
+		if utf8.RuneCountInString(urlStr) > 40 {
+			runes := []rune(urlStr)
+			urlStr = string(runes[:37]) + "..."
 		}
 		rightParts = append(rightParts,
 			lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(urlStr))
@@ -1538,98 +1587,161 @@ func (m Model) renderStatusLine(width int) string {
 // ─── Render footer ─────────────────────────────────────────
 
 func (m Model) renderFooter(width int) string {
-	// ── Left: directory ──
+	// Footer is a dedicated bottom panel: status row + context rows + legend row.
+	// This matches the design doc's footer/context visualization intent.
+
+	// Row 1: session / system status
 	dir := m.currentDir
 	if dir == "" {
 		dir = "~"
 	}
-	leftText := lipgloss.NewStyle().
-		Foreground(theme.Colors.TextDim).
-		Render(dir)
-
-	// ── Center: LSP + MCP + permissions ──
-	var centerParts []string
-	lspColor := theme.Colors.TextDim
-	if m.lspCount > 0 {
-		lspColor = theme.Colors.Success
-	}
-	centerParts = append(centerParts,
-		lipgloss.NewStyle().Foreground(lspColor).Render("●"),
-		fmt.Sprintf(" %d", m.lspCount))
-
-	if m.mcpCount > 0 {
-		mcpColor := theme.Colors.Success
-		if m.mcpError {
-			mcpColor = theme.Colors.Error
-		}
-		centerParts = append(centerParts, " ",
-			lipgloss.NewStyle().Foreground(mcpColor).Render("⊙"),
-			fmt.Sprintf(" %d", m.mcpCount))
-	}
-	if m.permissionCount > 0 {
-		centerParts = append(centerParts, " ",
-			lipgloss.NewStyle().Foreground(theme.Colors.Warning).Render("△"),
-			fmt.Sprintf("%d", m.permissionCount))
-	}
-
-	centerText := strings.Join(centerParts, "")
-
-	// ── Right: theme name (dot color already shows connected/disconnected) ──
 	dotColor := theme.Colors.Success
 	if !m.serverConnected {
 		dotColor = theme.Colors.Error
 	}
 	themeName := theme.ThemeDisplayName(theme.CurrentTheme)
-	rightText := lipgloss.NewStyle().Foreground(dotColor).Render("●") +
-		" " +
-		lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(themeName)
-
-	// ── Layout: FooterStyle has Padding(0,1) = 2 chars consumed ──
-	avail := width - 2 // content area inside footer padding
-
-	// Compute proportional widths that sum to avail
-	// Left 25%, right 30%, center 45%
-	leftW := avail * 25 / 100
-	rightW := avail * 30 / 100
-	centerW := avail - leftW - rightW
-
-	// Minimum safe widths (prevent word wrap)
-	const minLeft = 10
-	const minCenter = 16
-	const minRight = 16
-
-	if leftW < minLeft {
-		leftW = minLeft
-	}
-	if rightW < minRight {
-		rightW = minRight
-	}
-	// Recalc center if we stole from it
-	centerW = avail - leftW - rightW
-	if centerW < minCenter && avail >= minLeft+minRight+minCenter {
-		// Steal from left first
-		leftW = avail - rightW - minCenter
-		if leftW < minLeft {
-			leftW = minLeft
-		}
-		centerW = avail - leftW - rightW
-	}
-	if centerW < 4 {
-		centerW = 4
-	}
-
-	// Render each piece at exact width so nothing bleeds
-	lBlock := lipgloss.NewStyle().Width(leftW).MaxWidth(leftW).Align(lipgloss.Left).
-		Foreground(theme.Colors.TextDim).
-		Render(m.truncStr(leftText, leftW))
-	cBlock := lipgloss.NewStyle().Width(centerW).MaxWidth(centerW).Align(lipgloss.Center).
-		Render(m.truncStr(centerText, centerW))
-	rBlock := lipgloss.NewStyle().Width(rightW).MaxWidth(rightW).Align(lipgloss.Right).
-		Render(m.truncStr(rightText, rightW))
-
-	return theme.FooterStyle.Render(
-		lipgloss.JoinHorizontal(lipgloss.Top, lBlock, cBlock, rBlock),
+	left := lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(dir)
+	center := lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(
+		fmt.Sprintf("MCP:%d  LSP:%d  P:%d", m.mcpCount, m.lspCount, m.permissionCount),
 	)
+	right := lipgloss.NewStyle().Foreground(dotColor).Render("●") + " " +
+		lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(themeName)
+	row1 := theme.FooterStyle.Render(m.footerThreeCols(width, left, center, right))
+
+	// Row 2: multi-bar context visualization (role-based usage)
+	row2 := m.renderContextUsagePanel(width)
+
+	// Row 3: legend / totals
+	row3 := m.renderContextLegend(width)
+
+	return strings.Join([]string{row1, row2, row3}, "\n")
+}
+
+func (m Model) footerThreeCols(width int, left, center, right string) string {
+	avail := width - 2
+	if avail < 30 {
+		avail = 30
+	}
+	leftW := avail * 26 / 100
+	rightW := avail * 24 / 100
+	centerW := avail - leftW - rightW
+	if leftW < 10 {
+		leftW = 10
+	}
+	if rightW < 10 {
+		rightW = 10
+	}
+	if centerW < 10 {
+		centerW = 10
+	}
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(leftW).MaxWidth(leftW).Render(m.truncStr(left, leftW)),
+		lipgloss.NewStyle().Width(centerW).MaxWidth(centerW).Align(lipgloss.Center).Render(m.truncStr(center, centerW)),
+		lipgloss.NewStyle().Width(rightW).MaxWidth(rightW).Align(lipgloss.Right).Render(m.truncStr(right, rightW)),
+	)
+}
+
+func (m *Model) renderContextUsagePanel(width int) string {
+	if m.session == nil {
+		return theme.FooterStyle.Render("")
+	}
+
+	type stat struct {
+		role  string
+		name  string
+		color lipgloss.Color
+		count int
+		chars int
+	}
+
+	stats := []stat{
+		{role: RoleSystem, name: "system", color: theme.Colors.Primary},
+		{role: RoleUser, name: "user", color: theme.Colors.Success},
+		{role: RoleAssistant, name: "assistant", color: theme.Colors.Accent},
+		{role: RoleTool, name: "tool", color: theme.Colors.Warning},
+		{role: RoleError, name: "error", color: theme.Colors.Error},
+	}
+	idx := map[string]int{}
+	for i := range stats {
+		idx[stats[i].role] = i
+	}
+	for _, msg := range m.session.GetMessages() {
+		if i, ok := idx[msg.Role]; ok {
+			stats[i].count++
+			stats[i].chars += len(msg.Content)
+		}
+	}
+	total := 0
+	for _, s := range stats {
+		total += s.chars
+	}
+	if total == 0 {
+		return theme.FooterStyle.Render(m.footerPanelLine(width, "Context", "empty", ""))
+	}
+
+	barWidth := width - 18
+	if barWidth < 20 {
+		barWidth = 20
+	}
+	var parts []string
+	used := 0
+	for i, s := range stats {
+		if s.chars == 0 {
+			continue
+		}
+		segW := s.chars * barWidth / total
+		if segW < 1 {
+			segW = 1
+		}
+		if i == len(stats)-1 {
+			segW = barWidth - used
+		}
+		if segW < 1 {
+			segW = 1
+		}
+		used += segW
+		bar := lipgloss.NewStyle().Foreground(s.color).Render(strings.Repeat("█", segW))
+		pct := (s.chars * 100) / total
+		label := lipgloss.NewStyle().Foreground(s.color).Render(fmt.Sprintf(" %s %d%%", s.name, pct))
+		parts = append(parts, bar+label)
+	}
+	line := strings.Join(parts, "  ")
+	return theme.FooterStyle.Render(m.truncStr(line, width-2))
+}
+
+func (m *Model) renderContextLegend(width int) string {
+	if m.session == nil {
+		return theme.FooterStyle.Render("")
+	}
+	total := 0
+	var sys, usr, asst, tool, other int
+	for _, msg := range m.session.GetMessages() {
+		n := len(msg.Content)
+		total += n
+		switch msg.Role {
+		case RoleSystem:
+			sys += n
+		case RoleUser:
+			usr += n
+		case RoleAssistant:
+			asst += n
+		case RoleTool:
+			tool += n
+		default:
+			other += n
+		}
+	}
+	if total == 0 {
+		return theme.FooterStyle.Render("")
+	}
+	msg := fmt.Sprintf("sys %d%% · usr %d%% · asst %d%% · tool %d%% · other %d%% · total %d",
+		sys*100/total, usr*100/total, asst*100/total, tool*100/total, other*100/total, total)
+	return theme.FooterStyle.Render(lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(m.truncStr(msg, width-2)))
+}
+
+func (m *Model) footerPanelLine(width int, left, center, right string) string {
+	return m.footerThreeCols(width, left, center, right)
 }
 
 // truncStr truncates s to at most maxLen runes, appending "…" if cut.
@@ -1657,13 +1769,6 @@ func (m *Model) renderMainContent(width int) string {
 
 	// 1. Session messages (persistent conversation)
 	if m.session != nil {
-		// Context bar: colored role-distribution segments
-		contextBar := m.renderContextBar(width)
-		if contextBar != "" {
-			contentLines = append(contentLines, contextBar)
-			contentLines = append(contentLines, "") // spacing
-		}
-
 		msgs := m.session.GetMessages()
 		for i, msg := range msgs {
 			// Determine brightness style
@@ -1864,6 +1969,19 @@ func (m *Model) renderRightPanel(width int) string {
 		}
 	}
 
+	// ── Session section ──
+	{
+		expanded := m.panelSections["session"]
+		header := m.renderSectionHeader("Session", expanded, "")
+		sectionLines = append(sectionLines, header)
+		if expanded {
+			content := m.renderSessionTab(contentWidth)
+			for _, line := range strings.Split(content, "\n") {
+				sectionLines = append(sectionLines, theme.PanelStyle.Render(line))
+			}
+		}
+	}
+
 	// Apply scroll offset
 	maxScroll := len(sectionLines) - m.rightPanelHeight
 	if maxScroll < 0 {
@@ -1913,6 +2031,8 @@ func (m *Model) sectionIDByName(name string) string {
 		return "todo"
 	case "Files":
 		return "files"
+	case "Session":
+		return "session"
 	}
 	return ""
 }
@@ -1924,10 +2044,11 @@ func (m *Model) renderPanelTabs(width int) string {
 	}
 
 	tabNames := map[string]string{
-		"lsp":   "LSP",
-		"files": "Files",
-		"todo":  "TODO",
-		"mcp":   "MCP",
+		"lsp":     "LSP",
+		"files":   "Files",
+		"todo":    "TODO",
+		"mcp":     "MCP",
+		"session": "Session",
 	}
 
 	var tabStrs []string
@@ -1956,6 +2077,8 @@ func (m *Model) renderActiveTabContent(width int) string {
 		return m.renderTodoTab(width)
 	case "mcp":
 		return m.renderMCPTab(width)
+	case "session":
+		return m.renderSessionTab(width)
 	default:
 		return ""
 	}
@@ -2000,6 +2123,145 @@ func (m *Model) renderFilesTab(width int) string {
 	return lipgloss.NewStyle().
 		Foreground(theme.Colors.TextDim).
 		Render("No modified files")
+}
+
+// renderSessionTab shows session details: ID, messages, timing, context stats.
+func (m *Model) renderSessionTab(width int) string {
+	if m.session == nil {
+		return lipgloss.NewStyle().
+			Foreground(theme.Colors.TextDim).
+			Render("No active session")
+	}
+
+	msg := m.session.GetMessages()
+	var b strings.Builder
+
+	// Session ID (truncated)
+	sid := m.session.ID
+	if utf8.RuneCountInString(sid) > 16 {
+		runes := []rune(sid)
+		sid = string(runes[:16]) + "…"
+	}
+	b.WriteString(lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.Colors.Text).
+		Render("Session"))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(theme.Colors.TextDim).
+		Render(sid))
+	b.WriteString("\n\n")
+
+	// CWD
+	if m.session.CWD != "" {
+		b.WriteString(lipgloss.NewStyle().
+			Bold(true).
+			Foreground(theme.Colors.Text).
+			Render("Directory"))
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(theme.Colors.TextDim).
+			Render(m.truncStr(m.session.CWD, width-4)))
+		b.WriteString("\n\n")
+	}
+
+	// Message counts
+	var userCt, asstCt, sysCt, toolCt, errCt int
+	var totalChars int
+	for _, m := range msg {
+		totalChars += len(m.Content)
+		switch m.Role {
+		case RoleUser:
+			userCt++
+		case RoleAssistant:
+			asstCt++
+		case RoleSystem:
+			sysCt++
+		case RoleTool:
+			toolCt++
+		case RoleError:
+			errCt++
+		}
+	}
+	b.WriteString(lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.Colors.Text).
+		Render("Messages"))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(theme.Colors.Success).
+		Render(fmt.Sprintf("  user:      %d", userCt)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(theme.Colors.Accent).
+		Render(fmt.Sprintf("  assistant: %d", asstCt)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(theme.Colors.Primary).
+		Render(fmt.Sprintf("  system:    %d", sysCt)))
+	b.WriteString("\n")
+	if toolCt > 0 {
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(theme.Colors.Warning).
+			Render(fmt.Sprintf("  tool:      %d", toolCt)))
+		b.WriteString("\n")
+	}
+	if errCt > 0 {
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(theme.Colors.Error).
+			Render(fmt.Sprintf("  error:     %d", errCt)))
+		b.WriteString("\n")
+	}
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(theme.Colors.TextDim).
+		Render(fmt.Sprintf("  total:     %d", len(msg))))
+	b.WriteString("\n\n")
+
+	// Context size
+	b.WriteString(lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.Colors.Text).
+		Render("Context"))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(theme.Colors.TextDim).
+		Render(fmt.Sprintf("  chars: %d", totalChars)))
+	b.WriteString("\n")
+	if totalChars > 0 {
+		// Estimate tokens (rough: 4 chars per token)
+		tokEst := totalChars / 4
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(theme.Colors.TextDim).
+			Render(fmt.Sprintf("  ~%dK tokens", tokEst/1000)))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	// Last activity
+	if m.session.path != "" {
+		if fi, err := os.Stat(m.session.path); err == nil {
+			b.WriteString(lipgloss.NewStyle().
+				Bold(true).
+				Foreground(theme.Colors.Text).
+				Render("Last saved"))
+			b.WriteString("\n")
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(theme.Colors.TextDim).
+				Render(fi.ModTime().Format("15:04 Jan 02")))
+			b.WriteString("\n")
+		}
+	}
+
+	// Parent session (fork)
+	if m.session.ParentSession != "" {
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().
+			Italic(true).
+			Foreground(theme.Colors.TextDim).
+			Render("Forked session"))
+	}
+
+	return b.String()
 }
 
 // renderTodoTab shows todo items (placeholder).
@@ -2068,114 +2330,6 @@ func max(a, b int) int {
 	return b
 }
 
-// ─── Context bar ───────────────────────────────────────────
-
-// renderContextBar renders a colored segmented bar showing role distribution
-// across conversation messages (system/user/assistant/tool/error).
-// Reference: opencode desktop context bar (session-context-tab.tsx).
-func (m *Model) renderContextBar(width int) string {
-	if m.session == nil {
-		return ""
-	}
-
-	type roleStats struct {
-		role  string
-		count int
-		chars int // character count as proxy for tokens
-		color lipgloss.Color
-		label string
-	}
-
-	stats := []roleStats{
-		{role: RoleSystem, color: theme.Colors.Primary, label: "sys"},
-		{role: RoleUser, color: theme.Colors.Success, label: "usr"},
-		{role: RoleAssistant, color: theme.Colors.Accent, label: "asst"},
-		{role: RoleTool, color: theme.Colors.Warning, label: "tool"},
-		{role: RoleError, color: theme.Colors.Error, label: "err"},
-	}
-	roleIndex := map[string]int{}
-	for i, s := range stats {
-		roleIndex[s.role] = i
-	}
-
-	msgs := m.session.GetMessages()
-	for _, msg := range msgs {
-		idx, ok := roleIndex[msg.Role]
-		if !ok {
-			continue
-		}
-		stats[idx].count++
-		stats[idx].chars += len(msg.Content)
-	}
-
-	// Calculate proportions
-	totalChars := 0
-	for _, s := range stats {
-		totalChars += s.chars
-	}
-	if totalChars == 0 {
-		return ""
-	}
-
-	// Render segments
-	barWidth := width - 4 // padding
-	if barWidth < 20 {
-		barWidth = 20
-	}
-
-	var segments []string
-	usedWidth := 0
-	lastSignificant := 0
-	for i, s := range stats {
-		if s.chars > 0 {
-			lastSignificant = i
-		}
-	}
-
-	for i, s := range stats {
-		if s.chars == 0 {
-			continue
-		}
-		segW := s.chars * barWidth / totalChars
-		if segW < 1 {
-			segW = 1
-		}
-		// Last significant segment takes remaining space
-		if i == lastSignificant {
-			remaining := barWidth - usedWidth
-			if remaining > segW {
-				segW = remaining
-			}
-		}
-		if segW < 1 {
-			segW = 1
-		}
-		if usedWidth+segW > barWidth {
-			segW = barWidth - usedWidth
-		}
-
-		pct := s.chars * 100 / totalChars
-		block := lipgloss.NewStyle().
-			Foreground(s.color).
-			Render(strings.Repeat("█", segW))
-		countStr := lipgloss.NewStyle().
-			Foreground(s.color).
-			Render(fmt.Sprintf("%s %d%%", s.label, pct))
-		segments = append(segments, block+countStr)
-		usedWidth += segW
-		if usedWidth >= barWidth {
-			break
-		}
-	}
-
-	if len(segments) == 0 {
-		return ""
-	}
-
-	bar := strings.Join(segments, " ")
-	return bar
-}
-
 // ─── Dialog helpers ─────────────────────────────────────────
 
 // openCommandPalette opens the command palette dialog (Ctrl+P).
@@ -2231,6 +2385,67 @@ func (m Model) openHelpDialog() (tea.Model, tea.Cmd) {
 	m.dialogOpen = true
 	m.invalidateCache()
 	return m, nil
+}
+
+// openSessionPicker opens a dialog for selecting an existing session (Ctrl+S).
+// Always shows the picker when sessions exist, never auto-loads.
+func (m Model) openSessionPicker() (tea.Model, tea.Cmd) {
+	dir := m.currentDir
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	files, err := ListSessions()
+	if err != nil || len(files) == 0 {
+		// No sessions exist — create a new one
+		m.session = NewSession(dir)
+		m.invalidateCache()
+		return m, nil
+	}
+	m.sessionPickerOpen = true
+	m.activeDialog = newSessionPickerDialog(files, dir)
+	m.dialogOpen = true
+	m.invalidateCache()
+	return m, nil
+}
+
+func loadRecentSessionOrPrompt(cwd string) (*Session, []string) {
+	files, err := ListSessions()
+	if err != nil || len(files) == 0 {
+		return nil, files
+	}
+	latest, err := LoadSession(files[0])
+	if err != nil {
+		return nil, files
+	}
+	if latest.CWD != "" && cwd != "" && latest.CWD == cwd {
+		return latest, nil
+	}
+	return nil, files
+}
+
+func newSessionPickerDialog(files []string, cwd string) Dialog {
+	items := []DialogItem{{Title: "New Session", Description: "Start fresh", Category: "Actions", Value: "__new__"}}
+	for _, path := range files {
+		label := filepath.Base(path)
+		desc := cwd
+		if sess, err := LoadSession(path); err == nil {
+			if sess.CWD != "" {
+				desc = sess.CWD
+			}
+			if sess.ParentSession != "" {
+				desc += " · forked"
+			}
+		}
+		items = append(items, DialogItem{Title: label, Description: desc, Category: "History", Value: path})
+	}
+	return NewDialogSelect(DialogSession, "Session History", items, 14, func(item DialogItem) tea.Cmd {
+		return func() tea.Msg {
+			if item.Value == "__new__" {
+				return MsgSessionSelect{New: true}
+			}
+			return MsgSessionSelect{Path: item.Value}
+		}
+	})
 }
 
 // ─── Interface guards ────────────────────────────────────────
