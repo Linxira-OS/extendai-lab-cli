@@ -61,17 +61,16 @@ func RenderTable(props protocol.TableRenderProps, width int) string {
 
 	// Initialize with header widths
 	for i := 0; i < colCount && i < len(props.Headers); i++ {
-		w := displayWidth(props.Headers[i])
-		if w < minColWidth {
-			w = minColWidth
+		w := DisplayWidth(props.Headers[i])
+		if w > colWidths[i] {
+			colWidths[i] = w
 		}
-		colWidths[i] = w
 	}
 
-	// Expand with row content widths
+	// Expand for cell content
 	for _, row := range props.Rows {
 		for i := 0; i < colCount && i < len(row); i++ {
-			w := displayWidth(row[i])
+			w := DisplayWidth(row[i])
 			if w > colWidths[i] {
 				colWidths[i] = w
 			}
@@ -199,11 +198,13 @@ func RenderTable(props protocol.TableRenderProps, width int) string {
 }
 
 // padCell pads cell text to the specified width with proper alignment.
+// Uses displayWidth for correct multi-byte / emoji handling.
 func padCell(text string, width int, align string) string {
-	if len(text) >= width {
+	dw := DisplayWidth(text)
+	if dw >= width {
 		return text
 	}
-	padding := width - len(text)
+	padding := width - dw
 	switch align {
 	case "right":
 		return strings.Repeat(" ", padding) + text
@@ -229,16 +230,24 @@ func truncate(text string, maxWidth int) string {
 }
 
 // displayWidth returns the visual width of a string.
-// For ASCII (no CJK), this is simply len().
-// For CJK characters, need rune-aware counting.
-func displayWidth(s string) int {
+// Accounts for CJK, fullwidth forms, and emoji that occupy 2 columns.
+// DisplayWidth returns the visual width of a string.
+// Exported for use by other packages (e.g., model for panel padding).
+func DisplayWidth(s string) int {
 	width := 0
 	for _, r := range s {
-		if r >= 0x4E00 && r <= 0x9FFF || // CJK Unified
-			r >= 0x3000 && r <= 0x303F || // CJK Symbols
-			r >= 0xFF00 && r <= 0xFFEF { // Fullwidth Forms
+		switch {
+		case r >= 0x4E00 && r <= 0x9FFF, // CJK Unified
+			r >= 0x3000 && r <= 0x303F,   // CJK Symbols
+			r >= 0xFF00 && r <= 0xFFEF,   // Fullwidth Forms
+			r >= 0x1F300 && r <= 0x1F9FF, // Misc Symbols, Emoticons, Emoji
+			r >= 0x200D,                   // Zero-width joiner (ZWJ emoji sequences)
+			r == 0x231A || r == 0x231B,    // Watch, Hourglass
+			r == 0x23F0 || r == 0x23F3,    // Alarm, Hourglass with flowing sand
+			r >= 0x2600 && r <= 0x27BF,   // Misc symbols, Dingbats
+			r >= 0xFE00 && r <= 0xFE0F:   // Variation selectors (emoji presentation)
 			width += 2
-		} else {
+		default:
 			width++
 		}
 	}

@@ -22,7 +22,7 @@ const DEFAULT_CONFIG: AppConfig = {
     model: 'gpt-4o',
     maxTokens: 128_000,
     contextLength: 200_000,
-    systemPrompt: 'You are a helpful AI assistant.',
+    systemPrompt: 'You are a helpful AI assistant. Follow the design/specification directly. Do not repeatedly ask the user to confirm the next step when the implementation path is already defined. Prefer executing the documented plan and only ask when critical information is missing.',
     temperature: 0.7,
   },
 };

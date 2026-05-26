@@ -1370,8 +1370,9 @@ func (m Model) View() string {
 			// Pad to mainW-1, scrollbar takes the last column of left area
 			padded := lipgloss.NewStyle().Width(mainW - 1).Render(leftLine)
 			rightLine := panelLines[i]
-			if len(rightLine) < panelW {
-				rightLine += strings.Repeat(" ", panelW-len(rightLine))
+			// lipgloss.Width handles ANSI codes AND multi-byte characters correctly
+			if rlw := lipgloss.Width(rightLine); rlw < panelW {
+				rightLine += strings.Repeat(" ", panelW-rlw)
 			}
 			b.WriteString(padded)
 			b.WriteString(sbLines[i])

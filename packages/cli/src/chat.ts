@@ -97,7 +97,7 @@ export async function startChat(config: AppConfig, worktree: WorktreeInfo): Prom
     console.log(`  ║  Branch:  ${worktree.label.padEnd(34)}║`);
   }
   console.log('  ╠══════════════════════════════════════════════╣');
-  console.log('  ║  Type /help for commands                    ║');
+  console.log('  ║  Type /help for commands; follow docs directly ║');
   console.log('  ╚══════════════════════════════════════════════╝');
   console.log('');
 
@@ -314,7 +314,7 @@ async function handleCommand(
       process.exit(0);
 
     default:
-      console.log(`  Unknown command: /${cmd}. Type /help for available commands.\n`);
+      console.log(`  Unknown command: /${cmd}. Type /help for commands.\n`);
       return true;
   }
 

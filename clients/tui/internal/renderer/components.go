@@ -399,7 +399,7 @@ func renderProgress(c protocol.Component, ctx *RenderContext) string {
 	if v, ok := c.Props["percent"].(float64); ok {
 		pct = v
 	}
-	width := ctx.Width - len(label) - 4
+	width := ctx.Width - DisplayWidth(label) - 4
 	if width < 10 {
 		width = 10
 	}

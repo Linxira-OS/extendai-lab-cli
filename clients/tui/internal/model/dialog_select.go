@@ -16,6 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/renderer"
 	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -179,8 +180,8 @@ func (d *DialogSelect) View(width, height int) string {
 
 		lineText := prefix + title
 		if item.Subtitle != "" {
-			// Right-align subtitle
-			fill := width - 4 - len(lineText) - len(item.Subtitle)
+			// Right-align subtitle using display width for multi-byte safety
+			fill := width - 4 - renderer.DisplayWidth(lineText) - renderer.DisplayWidth(item.Subtitle)
 			if fill < 1 {
 				fill = 1
 			}
