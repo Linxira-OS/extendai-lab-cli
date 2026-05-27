@@ -14,7 +14,6 @@ import (
 	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/protocol"
 	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/renderer"
 	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/theme"
-	tuiView "github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/view"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -525,7 +524,8 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 		m.rightPanelHeight = 0
 	}
 
-	m.viewport.Width = mainW
+	// Content width = mainW - margins
+	m.viewport.Width = mainW - marginW*2
 	m.viewport.Height = vpHeight
 	m.ready = true
 	m.invalidateCache()
@@ -831,16 +831,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseLeft:
-		// Layout: header(1) + sep(1) + body(vpHeight) + input(3) + sep(1) + footer(1)
-		headerHeight := 1
-		sepLines := 1
+		// Layout: body(vpHeight) + prompt(promptAreaHeight)
 		vpHeight := m.bodyHeight(theme.TermHeight)
-		panelTopY := headerHeight + sepLines
+		inputStartY := vpHeight // prompt starts right after body
 
-		inputStartY := panelTopY + vpHeight // input starts right after body
-
-		if msg.Y >= inputStartY && msg.Y < inputStartY+inputBoxHeight {
-			// Click on input area → focus input
+		if msg.Y >= inputStartY && msg.Y < inputStartY+promptAreaHeight {
+			// Click on prompt area → focus input
 			m.focusZone = FocusInput
 			m.inputFocused = true
 			return m, nil
@@ -848,7 +844,6 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 		// Click on right panel area
 		if m.panelVisible(theme.TermWidth) {
-			// Compute the actual panel width the same way View() does
 			actualPanelW := panelWidthMax
 			if actualPanelW > theme.TermWidth-60 {
 				actualPanelW = theme.TermWidth - 60
@@ -857,10 +852,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				actualPanelW = panelWidthMin
 			}
 			panelLeft := theme.TermWidth - actualPanelW
-			if msg.X >= panelLeft && msg.Y >= panelTopY && msg.Y < panelTopY+vpHeight {
-			// Check if click is on a section header (expand/collapse toggle)
-			visualLine := msg.Y - panelTopY // 0-based within visible panel
-			unscrolledLine := visualLine + m.rightPanelScroll
+			if msg.X >= panelLeft && msg.Y >= 0 && msg.Y < vpHeight {
+				// Check if click is on a section header (expand/collapse toggle)
+				visualLine := msg.Y
+				unscrolledLine := visualLine + m.rightPanelScroll
 			if sectionID, ok := m.panelHeaderAtLine[unscrolledLine]; ok {
 				m.toggleSection(sectionID)
 				// Also update active tab to match clicked section
@@ -1316,8 +1311,8 @@ Focus:
 const (
 	panelWidthMax  = 42 // fixed right panel width (matching opencode-dev)
 	panelWidthMin  = 28
-	wideThreshold  = 100 // min terminal width for right panel auto-show
-	inputBoxHeight = 3
+	wideThreshold  = 120 // min terminal width for right panel auto-show (matching opencode)
+	marginW        = 2   // left/right content margin (matching opencode)
 	sepHeight      = 1
 )
 
@@ -1335,14 +1330,18 @@ func (m *Model) panelVisible(width int) bool {
 }
 
 // bodyHeight calculates the height available for the main content area.
+// Layout: body + prompt(4) — no header bar, no separate footer bar.
 func (m *Model) bodyHeight(height int) int {
-	// header(1) + sep(1) + body + input(3) + sep(1) + footer(1)
-	h := height - 1 - sepHeight - inputBoxHeight - sepHeight - 1
+	h := height - promptAreaHeight
 	if h < 5 {
 		h = 5
 	}
 	return h
 }
+
+// promptAreaHeight is the fixed height of the prompt+status area at the bottom.
+// 1 (spacer) + 1 (textarea border top) + 1 (textarea) + 1 (textarea border bottom / status row)
+const promptAreaHeight = 4
 
 // ─── View ────────────────────────────────────────────────────
 
@@ -1361,8 +1360,6 @@ func (m Model) View() string {
 	}
 
 	vpHeight := m.bodyHeight(height)
-
-	// Panel visibility based on available width
 	showPanel := m.panelVisible(width)
 
 	var panelW, mainW int
@@ -1374,44 +1371,24 @@ func (m Model) View() string {
 		if panelW < panelWidthMin {
 			panelW = panelWidthMin
 		}
-		mainW = width - panelW - 1 // -1 for vertical divider
+		mainW = width - panelW - 1
 	} else {
 		panelW = 0
 		mainW = width
 	}
 
+	// Effective content width = mainW - margins
+	contentW := mainW - marginW*2
+	if contentW < 20 {
+		contentW = 20
+	}
+
+	margin := strings.Repeat(" ", marginW)
 	var b strings.Builder
 
-	// ── Header bar (1 line) ──
-	b.WriteString(m.renderHeader(showPanel))
-	b.WriteString("\n")
-
-	// ── Separator ──
-	b.WriteString(lipgloss.NewStyle().
-		Foreground(theme.Colors.Muted).
-		Render(strings.Repeat("─", width)))
-	b.WriteString("\n")
-
-	// ── Scrollbar for main content area ──
-	totalLines := max(m.viewport.TotalLineCount(), vpHeight)
-	sb := tuiView.RenderStyledScrollbar(
-		m.viewport.YOffset,
-		totalLines,
-		vpHeight,
-		theme.ScrollbarTrackStyle,
-		theme.ScrollbarThumbStyle,
-	)
-	sbLines := strings.Split(sb, "\n")
-	for len(sbLines) < vpHeight {
-		sbLines = append(sbLines, " ")
-	}
-	if len(sbLines) > vpHeight {
-		sbLines = sbLines[:vpHeight]
-	}
-
-	// ── Body: main content + right panel ──
+	// ── Body: main content area ──
 	if showPanel {
-		mainRendered := m.renderMainContent(mainW)
+		mainRendered := m.renderMainContent(contentW)
 		mainLines := strings.Split(mainRendered, "\n")
 
 		panelRendered := m.renderRightPanel(panelW)
@@ -1431,28 +1408,23 @@ func (m Model) View() string {
 			panelLines = panelLines[:vpHeight]
 		}
 
-		divider := lipgloss.NewStyle().
-			Foreground(theme.Colors.Muted).
-			Render("│")
+		divider := lipgloss.NewStyle().Foreground(theme.Colors.Muted).Render("│")
 		for i := 0; i < vpHeight; i++ {
+			// Left margin + main content (padded to contentW) + scrollbar + divider + panel
 			leftLine := mainLines[i]
-			// Pad to mainW-1, scrollbar takes the last column of left area
-			padded := lipgloss.NewStyle().Width(mainW - 1).Render(leftLine)
+			padded := lipgloss.NewStyle().Width(contentW).Render(leftLine)
 			rightLine := panelLines[i]
-			// lipgloss.Width handles ANSI codes AND multi-byte characters correctly
 			if rlw := lipgloss.Width(rightLine); rlw < panelW {
 				rightLine += strings.Repeat(" ", panelW-rlw)
 			}
+			b.WriteString(margin)
 			b.WriteString(padded)
-			b.WriteString(sbLines[i])
 			b.WriteString(divider)
 			b.WriteString(rightLine)
 			b.WriteString("\n")
 		}
 	} else {
-		// Full-width main content + scrollbar at right edge
-		content := m.renderMainContent(mainW)
-
+		content := m.renderMainContent(contentW)
 		contentLines := strings.Split(content, "\n")
 		for len(contentLines) < vpHeight {
 			contentLines = append(contentLines, "")
@@ -1460,49 +1432,21 @@ func (m Model) View() string {
 		if len(contentLines) > vpHeight {
 			contentLines = contentLines[:vpHeight]
 		}
-
 		for i := 0; i < vpHeight; i++ {
 			line := contentLines[i]
-			// Pad to mainW-1, scrollbar fixed at rightmost column
-			padded := lipgloss.NewStyle().Width(mainW - 1).Render(line)
+			padded := lipgloss.NewStyle().Width(contentW).Render(line)
+			b.WriteString(margin)
 			b.WriteString(padded)
-			b.WriteString(sbLines[i])
 			b.WriteString("\n")
 		}
 	}
 
-	// ── Input bar ──
-	promptSymbol := theme.PromptStyle.Render(m.prompt)
-	displayText := m.input
-	if m.input == "" && m.prompt == ">" {
-		if m.inputFocused {
-			displayText = ""
-		} else {
-			displayText = "Type a message... (/help)"
-		}
-	}
-
-	inputBox := theme.InputStyle.Width(width - 4)
-	if m.focusZone == FocusInput {
-		inputBox = inputBox.BorderForeground(theme.Colors.Primary)
-	} else {
-		inputBox = inputBox.BorderForeground(theme.Colors.Muted)
-	}
-	b.WriteString(inputBox.Render(promptSymbol + " " + displayText))
-	b.WriteString("\n")
-
-	// ── Separator before footer ──
-	b.WriteString(lipgloss.NewStyle().
-		Foreground(theme.Colors.Muted).
-		Render(strings.Repeat("─", width)))
-	b.WriteString("\n")
-
-	// ── Footer ──
-	b.WriteString(m.renderFooter(width))
+	// ── Prompt area (OpenCode style: border + textarea + status row) ──
+	b.WriteString(m.renderPromptArea(width))
 
 	finalView := replaceTabs(b.String())
 
-	// ── Dialog overlay (rendered on top of everything) ──
+	// ── Dialog overlay ──
 	if m.dialogOpen && m.activeDialog != nil {
 		dlg := m.activeDialog
 		dlgH := dlg.Height()
@@ -1627,15 +1571,15 @@ func (m *Model) renderMainContent(width int) string {
 	}
 
 	m.viewport.Width = width
-
 	var contentLines []string
 
-	// 1. Session messages (persistent conversation)
+	// ── Top spacer (1 line, matching opencode) ──
+	contentLines = append(contentLines, "")
+
+	// 1. Session messages
 	if m.session != nil {
 		msgs := m.session.GetMessages()
 		for i, msg := range msgs {
-			// Determine dim style for thinking/tool messages.
-			// Use italic + TextDim instead of Faint(true) for cross-terminal readability.
 			dimStyle := lipgloss.NewStyle()
 			if msg.Brightness == BrightnessDim {
 				dimStyle = dimStyle.Italic(true).Foreground(theme.Colors.TextDim)
@@ -1643,58 +1587,56 @@ func (m *Model) renderMainContent(width int) string {
 
 			switch msg.Role {
 			case RoleUser:
-				contentLines = append(contentLines, theme.UserStyle.Render("You"))
-				contentLines = append(contentLines, msg.Content)
+				// ┃ User message (left border accent, matching opencode)
+				borderChar := lipgloss.NewStyle().Foreground(theme.Colors.Primary).Render("┃")
+				contentLines = append(contentLines,
+					borderChar+"  "+lipgloss.NewStyle().Foreground(theme.Colors.TextUser).Bold(true).Render(msg.Content))
 
 			case RoleAssistant:
-				contentLines = append(contentLines, theme.AssistantStyle.Render("Assistant"))
-				mdWidth := width - 4
+				// Assistant text (3-char indent, matching opencode)
+				mdWidth := width - 3
 				if mdWidth < 20 {
 					mdWidth = 20
 				}
 				rendered := renderer.RenderMarkdown(msg.Content, mdWidth)
-				// Apply dim style for thinking messages
 				if msg.Brightness == BrightnessDim {
 					rendered = dimStyle.Render(rendered)
 				}
-				contentLines = append(contentLines, rendered)
+				contentLines = append(contentLines, "   "+rendered)
 
-				// Timing footer for assistant messages
-				widthFull := width - 4
+				// Timing footer
+				widthFull := width - 3
 				if widthFull > 80 {
-					// Full mode
 					timing := msg.TimingFull()
 					if timing != "" {
 						contentLines = append(contentLines,
 							lipgloss.NewStyle().
 								Foreground(theme.Colors.TextDim).
 								Italic(true).
-								Width(widthFull).
-								Render(timing))
+								Render("   "+timing))
 					}
 				} else {
-					// Compact mode
 					timing := msg.TimingShort()
 					if timing != "" {
 						contentLines = append(contentLines,
 							lipgloss.NewStyle().
 								Foreground(theme.Colors.TextDim).
 								Italic(true).
-								Width(widthFull).
-								Render(timing))
+								Render("   "+timing))
 					}
 				}
 
 			case RoleTool:
-				// Tool calls: dimmer display
+				// Tool output (dim, left border)
+				borderChar := lipgloss.NewStyle().Foreground(theme.Colors.Muted).Render("┃")
 				toolHeader := lipgloss.NewStyle().
 					Foreground(theme.Colors.Muted).
-					Render("Tool: " + msg.ToolName)
+					Render("⚙ " + msg.ToolName)
 				if msg.Brightness == BrightnessDim {
 					toolHeader = dimStyle.Render(toolHeader)
 				}
-				contentLines = append(contentLines, toolHeader)
-				mdWidth := width - 4
+				contentLines = append(contentLines, borderChar+"  "+toolHeader)
+				mdWidth := width - 5
 				if mdWidth < 20 {
 					mdWidth = 20
 				}
@@ -1702,16 +1644,18 @@ func (m *Model) renderMainContent(width int) string {
 				if msg.Brightness == BrightnessDim {
 					rendered = dimStyle.Render(rendered)
 				}
-				contentLines = append(contentLines, rendered)
+				contentLines = append(contentLines, "   "+rendered)
 
 			case RoleError:
-				contentLines = append(contentLines, theme.ErrorStyle.Render(msg.Content))
+				contentLines = append(contentLines,
+					lipgloss.NewStyle().Foreground(theme.Colors.Error).Render("   ✗ "+msg.Content))
 
 			case RoleSystem:
-				contentLines = append(contentLines, theme.SystemStyle.Render(msg.Content))
+				contentLines = append(contentLines,
+					lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Italic(true).Render("   "+msg.Content))
 			}
 
-			// Separator between messages (except last)
+			// Spacer between messages
 			if i < len(msgs)-1 {
 				contentLines = append(contentLines, "")
 			}
@@ -1727,62 +1671,142 @@ func (m *Model) renderMainContent(width int) string {
 			}
 		}
 		if len(mainComps) > 0 {
-			filteredCmd := &protocol.RenderCommand{
-				Components: mainComps,
-			}
+			filteredCmd := &protocol.RenderCommand{Components: mainComps}
 			tsContent := renderer.RenderAllComponents(filteredCmd, width)
 			if tsContent != "" {
-				contentLines = append(contentLines, tsContent)
+				contentLines = append(contentLines, "   "+tsContent)
 			}
 		}
 	}
 
 	// 3. Streaming content (AI response in progress)
 	if m.ai.Status == protocol.AIStreaming || m.ai.Status == protocol.AIThinking {
-		mdWidth := width - 4
+		mdWidth := width - 3
 		if mdWidth < 20 {
 			mdWidth = 20
 		}
 
 		// Show reasoning/thinking content with dim styling
 		if m.ai.ReasoningContent != "" {
-			contentLines = append(contentLines, theme.AssistantStyle.Render("Thinking"))
-			// Truncate reasoning for display (show last 2000 chars)
+			borderChar := lipgloss.NewStyle().Foreground(theme.Colors.Muted).Render("┃")
+			contentLines = append(contentLines,
+				borderChar+"  "+lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Italic(true).Render("Thinking"))
 			reasoning := m.ai.ReasoningContent
 			if len(reasoning) > 2000 {
 				reasoning = "..." + reasoning[len(reasoning)-2000:]
 			}
 			reasoningRendered := renderer.RenderMarkdown(reasoning, mdWidth)
-			// Dim + italic for thinking — clearly distinct from normal content
-			dimStyle := lipgloss.NewStyle().
-				Foreground(theme.Colors.TextDim).
-				Italic(true)
-			contentLines = append(contentLines, dimStyle.Render(reasoningRendered))
+			dimStyle := lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Italic(true)
+			contentLines = append(contentLines, "   "+dimStyle.Render(reasoningRendered))
 		}
 
 		// Show actual content
 		if m.ai.Content != "" {
 			rendered := renderer.RenderMarkdown(m.ai.Content, mdWidth)
-			contentLines = append(contentLines,
-				theme.AssistantStyle.Render("Assistant"), rendered)
+			contentLines = append(contentLines, "   "+rendered)
 		} else if m.ai.Status == protocol.AIThinking && m.ai.ReasoningContent == "" {
-			// Still waiting for first token
 			contentLines = append(contentLines,
-				theme.AssistantStyle.Render("Assistant"),
-				lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render("  ⠋ thinking..."))
+				lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render("   ⠋ thinking..."))
 		}
 	}
 
 	// 4. Welcome message if nothing else
-	if len(contentLines) == 0 {
+	if len(contentLines) <= 1 { // only the spacer
 		contentLines = append(contentLines,
-			theme.SystemStyle.Render("Welcome to ExtendAI Lab. Type /help for commands."))
+			lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Italic(true).
+				Render("   Welcome to ExtendAI Lab. Type /help for commands."))
 	}
 
 	fullContent := strings.Join(contentLines, "\n")
 	m.cachedMain = fullContent
 	m.viewport.SetContent(fullContent)
 	return fullContent
+}
+
+// ─── Render prompt area (OpenCode style) ────────────────────
+// Replaces the old header + input + separator + footer with a single
+// prompt area at the bottom: spacer + input box + status row.
+
+func (m Model) renderPromptArea(width int) string {
+	margin := strings.Repeat(" ", marginW)
+	var b strings.Builder
+
+	// ── Spacer (1 line) ──
+	b.WriteString("\n")
+
+	// ── Input box with ┃ left border (matching opencode) ──
+	promptSymbol := theme.PromptStyle.Render(m.prompt)
+	displayText := m.input
+	if m.input == "" && m.prompt == ">" {
+		if m.inputFocused {
+			displayText = ""
+		} else {
+			displayText = lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render("Type a message... (/help)")
+		}
+	}
+
+	// Input line with left border accent
+	inputColor := theme.Colors.Muted
+	if m.focusZone == FocusInput {
+		inputColor = theme.Colors.Primary
+	}
+	borderChar := lipgloss.NewStyle().Foreground(inputColor).Render("┃")
+	inputLine := borderChar + "  " + promptSymbol + " " + displayText
+	b.WriteString(margin)
+	b.WriteString(lipgloss.NewStyle().Width(width - marginW*2).Render(inputLine))
+	b.WriteString("\n")
+
+	// ── Status row (model · context% · cost) ──
+	statusParts := []string{}
+
+	// AI working indicator
+	if m.ai.IsWorking() {
+		spinner := m.ai.SpinnerFrame()
+		label := m.ai.Label
+		if label == "" {
+			label = string(m.ai.Status)
+		}
+		statusParts = append(statusParts,
+			lipgloss.NewStyle().Foreground(theme.Colors.Accent).Render(spinner+" "+label))
+	} else if m.ai.Status == protocol.AIError {
+		statusParts = append(statusParts,
+			lipgloss.NewStyle().Foreground(theme.Colors.Error).Render("✗ error"))
+	}
+
+	// Model name (right side)
+	rightParts := []string{}
+	if m.modelName != "" {
+		rightParts = append(rightParts,
+			lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(m.modelName))
+	}
+
+	// Focus zone indicator
+	zoneLabel := ""
+	switch m.focusZone {
+	case FocusInput:
+		zoneLabel = "input"
+	case FocusPanel:
+		zoneLabel = "panel"
+	}
+	if zoneLabel != "" {
+		rightParts = append(rightParts,
+			lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(zoneLabel))
+	}
+
+	// Build status row: left status | right info
+	leftStatus := strings.Join(statusParts, "  ")
+	rightInfo := strings.Join(rightParts, "  ")
+	avail := width - marginW*2
+	fillLen := avail - lipgloss.Width(leftStatus) - lipgloss.Width(rightInfo)
+	if fillLen < 1 {
+		fillLen = 1
+	}
+
+	statusRow := leftStatus + strings.Repeat(" ", fillLen) + rightInfo
+	b.WriteString(margin)
+	b.WriteString(lipgloss.NewStyle().Width(avail).Render(statusRow))
+
+	return b.String()
 }
 
 // ─── Render right panel ─────────────────────────────────────
@@ -1851,10 +1875,13 @@ func (m *Model) renderSectionHeader(name string, expanded bool, summary string) 
 		Bold(true).
 		Foreground(color).
 		Render(toggle + " " + name)
-	dim := lipgloss.NewStyle().
-		Foreground(theme.Colors.TextDim).
-		Render(summary)
-	return header + " " + dim
+	if summary != "" {
+		dim := lipgloss.NewStyle().
+			Foreground(theme.Colors.TextDim).
+			Render(summary)
+		return header + " " + dim
+	}
+	return header
 }
 
 // sectionIDByName maps section display names to internal IDs.
