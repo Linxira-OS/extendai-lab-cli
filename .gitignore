@@ -19,6 +19,7 @@ studying/
 dist/
 build/
 out/
+tsconfig.tsbuildinfo
 
 # === 依赖 ===
 node_modules/

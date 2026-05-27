@@ -16,13 +16,16 @@
   },
   "scripts": {
     "build": "tsgo",
-    "typecheck": "tsgo",
+    "typecheck": "tsgo --noEmit",
     "dev": "node --experimental-strip-types packages/cli/src/index.ts",
-    "clean": "rm -rf packages/*/dist"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@typescript/native-preview": "^7.0.0-dev.20260524.1",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }

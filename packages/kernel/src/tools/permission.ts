@@ -59,18 +59,33 @@ const BUILT_IN_RULES: PermissionRule[] = [
 
 function globMatch(pattern: string, target: string): boolean {
   // 支持: *, **, {a,b}
-  if (pattern === '*' || pattern === '**/*' || pattern === '<project>/**') {
-    return true; // 简化：项目内路径假设为 true
+  if (pattern === '*' || pattern === '**/*') {
+    return true;
+  }
+  // <project>/**: only match relative paths (no leading . or /)
+  if (pattern === '<project>/**') {
+    return target.length > 0 && !target.startsWith('.') && !target.startsWith('/');
   }
   if (pattern.startsWith('~')) {
     const home = process.env.HOME || process.env.USERPROFILE || '';
     return target.includes(pattern.replace('~', home).replace('/**', ''));
   }
-  if (pattern.includes('/**')) {
-    const prefix = pattern.replace('/**', '');
+  // Handle patterns ending with /**: match prefix
+  if (pattern.endsWith('/**')) {
+    const prefix = pattern.slice(0, -3); // remove /**
+    // Handle ** prefix (recursive): check if target contains the middle part
+    if (prefix.startsWith('**/')) {
+      const middle = prefix.slice(3); // remove **/
+      return target.includes(middle);
+    }
     return target.startsWith(prefix);
   }
-  // 通配符匹配
+  // Handle ** at start (recursive match)
+  if (pattern.startsWith('**/')) {
+    const suffix = pattern.slice(3);
+    return target.includes(suffix);
+  }
+  // 通配符匹配 (single-level wildcard)
   const regexStr = pattern
     .replace(/\./g, '\\.')
     .replace(/\*/g, '.*')

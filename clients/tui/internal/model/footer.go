@@ -166,25 +166,27 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 	// Build segments: each segment width = chars / maxChars * barWidth
 	// This shows usage relative to TOTAL context window, not relative to each other
 	var segments []string
+	usedWidth := 0
 	for _, s := range stats {
 		if s.chars > 0 {
 			segW := int(float64(s.chars) / float64(maxChars) * float64(barWidth))
 			if segW == 0 && s.chars > 0 {
 				segW = 1
 			}
-			segments = append(segments, lipgloss.NewStyle().
-				Background(s.color).
-				Render(strings.Repeat(" ", segW)))
+			// Cap segment width to prevent overflow
+			if usedWidth+segW > barWidth {
+				segW = barWidth - usedWidth
+			}
+			if segW > 0 {
+				segments = append(segments, lipgloss.NewStyle().
+					Background(s.color).
+					Render(strings.Repeat(" ", segW)))
+				usedWidth += segW
+			}
 		}
 	}
 
 	// Add gray "unused" segment to fill remaining bar width
-	usedWidth := 0
-	for _, s := range stats {
-		if s.chars > 0 {
-			usedWidth += int(float64(s.chars) / float64(maxChars) * float64(barWidth))
-		}
-	}
 	remaining := barWidth - usedWidth
 	if remaining > 0 {
 		segments = append(segments, lipgloss.NewStyle().
