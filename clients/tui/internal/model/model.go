@@ -33,11 +33,12 @@ const (
 // ─── AI State ────────────────────────────────────────────────
 
 type AIState struct {
-	Status   protocol.AIStatus // idle | thinking | streaming | error
-	Label    string            // human-readable label
-	Model    string            // model name
-	Content  string            // accumulated streaming content
-	ErrorMsg string            // last error message
+	Status           protocol.AIStatus // idle | thinking | streaming | error
+	Label            string            // human-readable label
+	Model            string            // model name
+	Content          string            // accumulated streaming content
+	ReasoningContent string            // accumulated reasoning/thinking content
+	ErrorMsg         string            // last error message
 }
 
 func (s AIState) IsWorking() bool {
@@ -67,9 +68,10 @@ type MsgAIStatus struct {
 	Label  string
 }
 type MsgStreamChunk struct {
-	Content string
-	Done    bool
-	Error   string
+	Content          string
+	ReasoningContent string
+	Done             bool
+	Error            string
 }
 type MsgStatusUpdate struct {
 	Update protocol.StatusUpdate
@@ -350,13 +352,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reqFirstToken = time.Now()
 		}
 
-		m.ai.Status = protocol.AIStreaming
-		m.ai.Content += msg.Content
-		m.reqTokensOut += len(msg.Content) / 4 // rough token estimate
+		// Track reasoning content separately
+		if msg.ReasoningContent != "" {
+			m.ai.ReasoningContent += msg.ReasoningContent
+		}
+
+		if msg.Content != "" {
+			m.ai.Status = protocol.AIStreaming
+			m.ai.Content += msg.Content
+			m.reqTokensOut += len(msg.Content) / 4 // rough token estimate
+		} else if msg.ReasoningContent != "" {
+			// Only reasoning so far — stay in thinking state
+			if m.ai.Status != protocol.AIStreaming {
+				m.ai.Status = protocol.AIThinking
+				m.ai.Label = "thinking"
+			}
+		}
 
 		if msg.Done {
 			m.ai.Status = protocol.AIIdle
-			if m.ai.Content != "" {
+			// Build final content: reasoning + content
+			finalContent := m.ai.Content
+			if m.ai.ReasoningContent != "" && m.ai.Content != "" {
+				finalContent = m.ai.ReasoningContent + "\n\n---\n\n" + m.ai.Content
+			} else if m.ai.ReasoningContent != "" {
+				finalContent = m.ai.ReasoningContent
+			}
+			if finalContent != "" {
 				// Compute timing
 				dur := time.Duration(0)
 				ttft := time.Duration(0)
@@ -366,13 +388,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.reqFirstToken.IsZero() {
 					ttft = m.reqFirstToken.Sub(m.reqStart)
 				}
-				asm := NewAssistantMessage(m.ai.Content, dur, ttft, 0, m.reqTokensOut, 0)
+				asm := NewAssistantMessage(finalContent, dur, ttft, 0, m.reqTokensOut, 0)
 				if m.session != nil {
 					m.session.AppendMessage(asm)
 					m.session.Save()
 				}
 			}
 			m.ai.Content = ""
+			m.ai.ReasoningContent = ""
 			m.reqStart = time.Time{}
 			m.reqFirstToken = time.Time{}
 			m.reqTokensOut = 0
@@ -835,14 +858,16 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 			panelLeft := theme.TermWidth - actualPanelW
 			if msg.X >= panelLeft && msg.Y >= panelTopY && msg.Y < panelTopY+vpHeight {
-				// Check if click is on a section header (expand/collapse toggle)
-				visualLine := msg.Y - panelTopY // 0-based within visible panel
-				unscrolledLine := visualLine + m.rightPanelScroll
-				if sectionID, ok := m.panelHeaderAtLine[unscrolledLine]; ok {
-					m.toggleSection(sectionID)
-					m.invalidateCache()
-					return m, nil
-				}
+			// Check if click is on a section header (expand/collapse toggle)
+			visualLine := msg.Y - panelTopY // 0-based within visible panel
+			unscrolledLine := visualLine + m.rightPanelScroll
+			if sectionID, ok := m.panelHeaderAtLine[unscrolledLine]; ok {
+				m.toggleSection(sectionID)
+				// Also update active tab to match clicked section
+				m.activeRightTab = sectionID
+				m.invalidateCache()
+				return m, nil
+			}
 				m.focusZone = FocusPanel
 				return m, nil
 			}
@@ -1189,7 +1214,10 @@ func (m Model) apiNextChunk() tea.Cmd {
 		if evt.Done {
 			return MsgStreamChunk{Done: true}
 		}
-		return MsgStreamChunk{Content: evt.Content}
+		return MsgStreamChunk{
+			Content:          evt.Content,
+			ReasoningContent: evt.ReasoningContent,
+		}
 	}
 }
 
@@ -1710,14 +1738,39 @@ func (m *Model) renderMainContent(width int) string {
 	}
 
 	// 3. Streaming content (AI response in progress)
-	if m.ai.Status == protocol.AIStreaming && m.ai.Content != "" {
+	if m.ai.Status == protocol.AIStreaming || m.ai.Status == protocol.AIThinking {
 		mdWidth := width - 4
 		if mdWidth < 20 {
 			mdWidth = 20
 		}
-		rendered := renderer.RenderMarkdown(m.ai.Content, mdWidth)
-		contentLines = append(contentLines,
-			theme.AssistantStyle.Render("Assistant"), rendered)
+
+		// Show reasoning/thinking content with dim styling
+		if m.ai.ReasoningContent != "" {
+			contentLines = append(contentLines, theme.AssistantStyle.Render("Thinking"))
+			// Truncate reasoning for display (show last 2000 chars)
+			reasoning := m.ai.ReasoningContent
+			if len(reasoning) > 2000 {
+				reasoning = "..." + reasoning[len(reasoning)-2000:]
+			}
+			reasoningRendered := renderer.RenderMarkdown(reasoning, mdWidth)
+			// Dim + italic for thinking — clearly distinct from normal content
+			dimStyle := lipgloss.NewStyle().
+				Foreground(theme.Colors.TextDim).
+				Italic(true)
+			contentLines = append(contentLines, dimStyle.Render(reasoningRendered))
+		}
+
+		// Show actual content
+		if m.ai.Content != "" {
+			rendered := renderer.RenderMarkdown(m.ai.Content, mdWidth)
+			contentLines = append(contentLines,
+				theme.AssistantStyle.Render("Assistant"), rendered)
+		} else if m.ai.Status == protocol.AIThinking && m.ai.ReasoningContent == "" {
+			// Still waiting for first token
+			contentLines = append(contentLines,
+				theme.AssistantStyle.Render("Assistant"),
+				lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render("  ⠋ thinking..."))
+		}
 	}
 
 	// 4. Welcome message if nothing else

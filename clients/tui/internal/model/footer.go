@@ -145,9 +145,17 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 	}
 	maxChars := maxTokens * 4 // conservative: 1 token ≈ 4 chars
 
-	// Bar layout: [████░░░░░░] 0.1K / 128K
-	// Reserve space for " 0.1K / 128K" = ~18 chars
-	barWidth := width - 18
+	// Choose format based on available width
+	// Narrow: "███░░ 0.1K/128K" (no spaces around /)
+	// Wide:   "███░░░░░░░░ 0.1K / 128K"
+	isNarrow := width < 60
+
+	// Reserve space for text label
+	textReserve := 18 // " 0.1K / 128K"
+	if isNarrow {
+		textReserve = 14 // " 0.1K/128K"
+	}
+	barWidth := width - textReserve
 	if barWidth < 5 {
 		barWidth = 5
 	}
@@ -157,14 +165,18 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 		bar := lipgloss.NewStyle().
 			Background(theme.Colors.Muted).
 			Render(strings.Repeat(" ", barWidth))
-		text := lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(
-			fmt.Sprintf("%s 0 / %s", bar, formatTokenK(maxTokens)),
-		)
+		var text string
+		if isNarrow {
+			text = lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(
+				fmt.Sprintf("%s %.1fK/%s", bar, 0.0, formatTokenK(maxTokens)))
+		} else {
+			text = lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(
+				fmt.Sprintf("%s 0 / %s", bar, formatTokenK(maxTokens)))
+		}
 		return text, 0
 	}
 
 	// Build segments: each segment width = chars / maxChars * barWidth
-	// This shows usage relative to TOTAL context window, not relative to each other
 	var segments []string
 	usedWidth := 0
 	for _, s := range stats {
@@ -207,9 +219,15 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 		pct = 100
 	}
 	ctxColor := contextStatusColor(pct)
-	text := lipgloss.NewStyle().Foreground(ctxColor).Render(
-		fmt.Sprintf("%s %s / %s", bar, currentK, totalK),
-	)
+
+	var text string
+	if isNarrow {
+		text = lipgloss.NewStyle().Foreground(ctxColor).Render(
+			fmt.Sprintf("%s %.1fK/%s", bar, float64(estimatedTokens)/1000, totalK))
+	} else {
+		text = lipgloss.NewStyle().Foreground(ctxColor).Render(
+			fmt.Sprintf("%s %s / %s", bar, currentK, totalK))
+	}
 
 	return text, pct
 }
@@ -249,17 +267,18 @@ func renderFooterFromProps(width int, p FooterProps) string {
 		lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(p.ThemeName))
 	right := strings.Join(rightParts, "  ")
 
-	// ── Center region: working state or context bar ──
-	var center string
+	// ── Center region: always show context bar ──
+	// If working, overlay a small spinner on the right side of the bar
+	center := p.ContextBar
 	if p.IsWorking && p.SpinnerFrame != "" {
 		label := p.WorkingLabel
 		if label == "" {
 			label = "working"
 		}
-		center = lipgloss.NewStyle().Foreground(p.WorkingColor).Render(
+		spinnerText := lipgloss.NewStyle().Foreground(p.WorkingColor).Render(
 			fmt.Sprintf("%s %s", p.SpinnerFrame, label))
-	} else {
-		center = p.ContextBar
+		// Append spinner after context bar, with padding
+		center = center + "  " + spinnerText
 	}
 
 	// ── Layout: left | center | right ──

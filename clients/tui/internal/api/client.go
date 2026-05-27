@@ -46,9 +46,10 @@ type ModelInfo struct {
 
 // StreamEvent is yielded on the channel returned by SendMessage.
 type StreamEvent struct {
-	Content string // delta text accumulated so far
-	Done    bool
-	Error   error
+	Content          string // regular content delta
+	ReasoningContent string // reasoning/thinking delta (shown dimmer)
+	Done             bool
+	Error            error
 }
 
 // capReasoning holds LM Studio's reasoning field shape.
@@ -385,14 +386,14 @@ streamLoop:
 			continue
 		}
 
-		// Prefer content; fall back to reasoning_content
-		text := delta
-		if text == "" {
-			text = rc
+		// Send both content and reasoning_content as separate events
+		if delta != "" {
+			fullContent.WriteString(delta)
+			ch <- StreamEvent{Content: delta}
 		}
-
-		fullContent.WriteString(text)
-		ch <- StreamEvent{Content: text}
+		if rc != "" {
+			ch <- StreamEvent{ReasoningContent: rc}
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
