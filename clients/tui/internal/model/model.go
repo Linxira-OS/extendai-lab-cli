@@ -1414,6 +1414,9 @@ func (m Model) View() string {
 		divider := thin.Render("│")
 		for i := 0; i < vpHeight; i++ {
 			leftLine := mainLines[i]
+			// CRITICAL: truncate to contentW to prevent terminal line-wrap
+			// which would desync left/right columns
+			leftLine = truncateToWidth(leftLine, contentW)
 			padded := lipgloss.NewStyle().Width(contentW).Render(leftLine)
 			rightLine := panelLines[i]
 			if rlw := lipgloss.Width(rightLine); rlw < panelW {
@@ -1435,7 +1438,8 @@ func (m Model) View() string {
 			contentLines = contentLines[:vpHeight]
 		}
 		for i := 0; i < vpHeight; i++ {
-			padded := lipgloss.NewStyle().Width(contentW).Render(contentLines[i])
+			line := truncateToWidth(contentLines[i], contentW)
+			padded := lipgloss.NewStyle().Width(contentW).Render(line)
 			b.WriteString(margin)
 			b.WriteString(padded)
 			b.WriteString("\n")
@@ -1646,15 +1650,17 @@ func (m *Model) renderMainContent(width int) string {
 				}
 
 			case RoleTool:
-				// Tool output (dim, left border)
-				borderChar := lipgloss.NewStyle().Foreground(theme.Colors.Muted).Render("┃")
-				toolHeader := lipgloss.NewStyle().
-					Foreground(theme.Colors.Muted).
-					Render("⚙ " + msg.ToolName)
-				if msg.Brightness == BrightnessDim {
-					toolHeader = dimStyle.Render(toolHeader)
+				// Tool card with ╭│╰ rail (CodeWhale style)
+				familyGlyph := toolFamilyGlyph(msg.ToolName)
+				toolColor := theme.Colors.Muted
+				if msg.Brightness != BrightnessDim {
+					toolColor = theme.Colors.Warning
 				}
-				contentLines = append(contentLines, borderChar+"  "+toolHeader)
+				// Card header: ╭ ▷ tool_name
+				headerLine := lipgloss.NewStyle().Foreground(toolColor).Render(
+					"╭ " + familyGlyph + " " + msg.ToolName)
+				contentLines = append(contentLines, headerLine)
+				// Card body: │ content
 				mdWidth := width - 5
 				if mdWidth < 20 {
 					mdWidth = 20
@@ -1663,7 +1669,13 @@ func (m *Model) renderMainContent(width int) string {
 				if msg.Brightness == BrightnessDim {
 					rendered = dimStyle.Render(rendered)
 				}
-				contentLines = append(contentLines, "   "+rendered)
+				for _, line := range strings.Split(rendered, "\n") {
+					contentLines = append(contentLines,
+						lipgloss.NewStyle().Foreground(toolColor).Render("│ ") + line)
+				}
+				// Card footer: ╰ summary
+				contentLines = append(contentLines,
+					lipgloss.NewStyle().Foreground(toolColor).Render("╰"))
 
 			case RoleError:
 				contentLines = append(contentLines,
@@ -1828,14 +1840,15 @@ func (m Model) renderPromptArea(width int) string {
 	return b.String()
 }
 
-// ─── Render header bar ───────────────────────────────────────
-// Shows: ● ExtendAI Lab ─ session-id ─ [connected]
+// ─── Render header bar (CodeWhale style) ────────────────────
+// Shows: ● ExtendAI Lab ─ session-id ─ [status]    model · ctx% · ● Live
 
 func (m Model) renderHeaderBar(width int) string {
 	thin := lipgloss.NewStyle().Foreground(theme.Colors.Muted)
-	sep := thin.Render(" ─ ")
+	dim := lipgloss.NewStyle().Foreground(theme.Colors.TextDim)
+	sep := thin.Render(" · ")
 
-	// Left: connection dot + title
+	// Left cluster: connection dot + title + session ID
 	connColor := theme.Colors.Success
 	connText := "●"
 	if !m.serverConnected {
@@ -1845,35 +1858,60 @@ func (m Model) renderHeaderBar(width int) string {
 	left := lipgloss.NewStyle().Foreground(connColor).Render(connText) +
 		" " + lipgloss.NewStyle().Bold(true).Render("ExtendAI Lab")
 
-	// Session ID
 	if m.session != nil && m.session.ID != "" {
 		sid := m.session.ID
-		if utf8.RuneCountInString(sid) > 16 {
+		if utf8.RuneCountInString(sid) > 12 {
 			runes := []rune(sid)
-			sid = string(runes[:16]) + "…"
+			sid = string(runes[:12]) + "…"
 		}
-		left += sep + lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(sid)
+		left += thin.Render(" ─ ") + dim.Render(sid)
 	}
 
-	// AI status
+	// Right cluster: model · ctx% · status chips
+	rightParts := []string{}
+
+	// Model name chip
+	if m.modelName != "" {
+		rightParts = append(rightParts,
+			lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(m.modelName))
+	}
+
+	// Context usage chip (from session)
+	if m.session != nil {
+		totalChars := 0
+		for _, msg := range m.session.GetMessages() {
+			totalChars += utf8.RuneCountInString(msg.Content)
+		}
+		maxTokens := 128000
+		if m.apiClient != nil && m.apiClient.Info() != nil && m.apiClient.Info().ContextLength > 0 {
+			maxTokens = m.apiClient.Info().ContextLength
+		}
+		pct := float64(totalChars/4) / float64(maxTokens) * 100
+		if pct > 100 {
+			pct = 100
+		}
+		pctColor := theme.Colors.Success
+		if pct >= 85 {
+			pctColor = theme.Colors.Warning
+		}
+		if pct >= 95 {
+			pctColor = theme.Colors.Error
+		}
+		rightParts = append(rightParts,
+			lipgloss.NewStyle().Foreground(pctColor).Render(fmt.Sprintf("%.0f%%", pct)))
+	}
+
+	// Live indicator (when AI is working)
 	if m.ai.IsWorking() {
 		spinner := m.ai.SpinnerFrame()
-		label := m.ai.Label
-		if label == "" {
-			label = string(m.ai.Status)
-		}
-		left += sep + lipgloss.NewStyle().Foreground(theme.Colors.Accent).Render(spinner+" "+label)
-	} else if m.ai.Status == protocol.AIError {
-		left += sep + lipgloss.NewStyle().Foreground(theme.Colors.Error).Render("✗ error")
+		rightParts = append(rightParts,
+			lipgloss.NewStyle().Foreground(theme.Colors.Secondary).Bold(true).Render(
+				spinner+" Live"))
 	}
 
-	// Right: model name
-	right := ""
-	if m.modelName != "" {
-		right = lipgloss.NewStyle().Foreground(theme.Colors.Secondary).Render(m.modelName)
-	}
+	right := strings.Join(rightParts, sep)
 
-	// Fill
+	// Layout: left | fill | right
 	avail := width - marginW*2
 	fillLen := avail - lipgloss.Width(left) - lipgloss.Width(right)
 	if fillLen < 1 {
@@ -1881,7 +1919,8 @@ func (m Model) renderHeaderBar(width int) string {
 	}
 
 	margin := strings.Repeat(" ", marginW)
-	return margin + lipgloss.NewStyle().Width(avail).Render(left+strings.Repeat(" ", fillLen)+right)
+	return margin + lipgloss.NewStyle().Width(avail).Render(
+		left+strings.Repeat(" ", fillLen)+right)
 }
 
 // ─── Render context usage bar ────────────────────────────────
@@ -2300,11 +2339,73 @@ func loadOrCreateSession(cwd string) *Session {
 
 // replaceTabs replaces tab characters with spaces in the rendered output.
 // This prevents alignment issues in terminals where tabs render at fixed stops.
+// toolFamilyGlyph returns a CodeWhale-style family glyph for a tool name.
+// ▷ read  ◆ patch  ▶ run  ⌕ find  ◐ delegate  ⋮⋮ fanout  • generic
+func toolFamilyGlyph(toolName string) string {
+	lower := strings.ToLower(toolName)
+	switch {
+	case strings.Contains(lower, "read") || strings.Contains(lower, "file_read"):
+		return lipgloss.NewStyle().Foreground(theme.Colors.Primary).Render("▷")
+	case strings.Contains(lower, "write") || strings.Contains(lower, "edit") || strings.Contains(lower, "patch"):
+		return lipgloss.NewStyle().Foreground(theme.Colors.Accent).Render("◆")
+	case strings.Contains(lower, "bash") || strings.Contains(lower, "shell") || strings.Contains(lower, "exec") || strings.Contains(lower, "run"):
+		return lipgloss.NewStyle().Foreground(theme.Colors.Secondary).Render("▶")
+	case strings.Contains(lower, "search") || strings.Contains(lower, "grep") || strings.Contains(lower, "glob") || strings.Contains(lower, "find"):
+		return lipgloss.NewStyle().Foreground(theme.Colors.Warning).Render("⌕")
+	case strings.Contains(lower, "agent") || strings.Contains(lower, "delegate") || strings.Contains(lower, "task"):
+		return lipgloss.NewStyle().Foreground(theme.Colors.Secondary).Render("◐")
+	default:
+		return lipgloss.NewStyle().Foreground(theme.Colors.Muted).Render("•")
+	}
+}
+
 func replaceTabs(s string) string {
 	return strings.ReplaceAll(s, "\t", "    ")
 }
 
-// ─── Helpers ─────────────────────────────────────────────────
+// truncateToWidth truncates a string to fit within maxW visual columns.
+// Handles ANSI escape codes (zero visual width) and multi-byte characters.
+// If the line fits, returns it unchanged. Otherwise truncates with "…".
+func truncateToWidth(s string, maxW int) string {
+	if maxW < 2 {
+		return ""
+	}
+	// Fast path: if lipgloss.Width says it fits, return as-is
+	if lipgloss.Width(s) <= maxW {
+		return s
+	}
+	// Walk the string, tracking visual width.
+	// Skip ANSI escape sequences (they have zero visual width).
+	var result []rune
+	vw := 0
+	runes := []rune(s)
+	inEsc := false
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		// Detect ANSI escape sequence: ESC[
+		if r == '\x1b' && i+1 < len(runes) && runes[i+1] == '[' {
+			inEsc = true
+			result = append(result, r)
+			continue
+		}
+		if inEsc {
+			result = append(result, r)
+			// End of escape: letter character terminates
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEsc = false
+			}
+			continue
+		}
+		// Normal character
+		rw := lipgloss.Width(string(r))
+		if vw+rw > maxW-1 {
+			break
+		}
+		result = append(result, r)
+		vw += rw
+	}
+	return string(result) + "…"
+}
 
 func max(a, b int) int {
 	if a > b {
