@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -98,11 +99,19 @@ func NewFromEnv() *Client {
 	if baseURL == "" {
 		return nil
 	}
+	// Use Transport with no overall timeout for streaming.
+	// The Timeout on http.Client kills streaming connections.
 	return &Client{
 		baseURL: baseURL,
 		apiKey:  os.Getenv("EXTENDAI_API_KEY"),
 		model:   os.Getenv("EXTENDAI_MODEL"),
-		http:    &http.Client{Timeout: 5 * time.Minute},
+		http: &http.Client{
+			Timeout: 0, // no overall timeout — streaming needs open-ended body read
+			Transport: &http.Transport{
+				ResponseHeaderTimeout: 30 * time.Second, // max wait for first byte
+				IdleConnTimeout:       90 * time.Second,
+			},
+		},
 	}
 }
 
@@ -342,7 +351,12 @@ func (c *Client) stream(req *http.Request, ch chan<- StreamEvent) {
 		return
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
+	// Wrap body with a deadline for the first byte — prevents blocking forever
+	// if the server accepts the connection but never sends data.
+	deadlineReader := newDeadlineReader(resp.Body, 60*time.Second)
+	defer deadlineReader.Stop()
+
+	scanner := bufio.NewScanner(deadlineReader)
 	scanner.Buffer(make([]byte, 0, 65536), 65536)
 
 	var fullContent strings.Builder
@@ -406,4 +420,54 @@ streamLoop:
 	c.history = append(c.history, Message{Role: "assistant", Content: assistantMsg})
 
 	ch <- StreamEvent{Done: true}
+}
+
+// ─── Deadline reader (prevents blocking on slow servers) ───────
+
+// deadlineReader wraps an io.ReadCloser and closes it after a timeout
+// if no data has been read. This prevents the scanner from blocking forever
+// when the server accepts the connection but never sends data.
+type deadlineReader struct {
+	r       io.ReadCloser
+	timer   *time.Timer
+	once    sync.Once
+	timeout time.Duration
+}
+
+func newDeadlineReader(r io.ReadCloser, timeout time.Duration) *deadlineReader {
+	dr := &deadlineReader{r: r, timeout: timeout}
+	dr.resetTimer()
+	return dr
+}
+
+func (dr *deadlineReader) resetTimer() {
+	if dr.timer != nil {
+		dr.timer.Stop()
+	}
+	dr.timer = time.AfterFunc(dr.timeout, func() {
+		dr.once.Do(func() {
+			dr.r.Close()
+		})
+	})
+}
+
+func (dr *deadlineReader) Read(p []byte) (int, error) {
+	n, err := dr.r.Read(p)
+	if n > 0 {
+		dr.resetTimer() // reset deadline on progress
+	}
+	return n, err
+}
+
+func (dr *deadlineReader) Close() error {
+	if dr.timer != nil {
+		dr.timer.Stop()
+	}
+	return dr.r.Close()
+}
+
+func (dr *deadlineReader) Stop() {
+	if dr.timer != nil {
+		dr.timer.Stop()
+	}
 }
