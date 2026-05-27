@@ -831,18 +831,21 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseLeft:
-		// Layout: body(vpHeight) + prompt(promptAreaHeight)
+		// Layout: header(1) + body(vpHeight) + separator(1) + prompt(3) + contextBar(1)
 		vpHeight := m.bodyHeight(theme.TermHeight)
-		inputStartY := vpHeight // prompt starts right after body
+		bodyStartY := headerHeight                // body starts after header
+		sepY := bodyStartY + vpHeight             // separator
+		promptStartY := sepY + 1                  // prompt starts after separator
+		ctxBarY := promptStartY + promptAreaHeight // context bar
 
-		if msg.Y >= inputStartY && msg.Y < inputStartY+promptAreaHeight {
-			// Click on prompt area → focus input
+		// Click on prompt area
+		if msg.Y >= promptStartY && msg.Y < ctxBarY {
 			m.focusZone = FocusInput
 			m.inputFocused = true
 			return m, nil
 		}
 
-		// Click on right panel area
+		// Click on right panel area (within body region)
 		if m.panelVisible(theme.TermWidth) {
 			actualPanelW := panelWidthMax
 			if actualPanelW > theme.TermWidth-60 {
@@ -852,24 +855,25 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				actualPanelW = panelWidthMin
 			}
 			panelLeft := theme.TermWidth - actualPanelW
-			if msg.X >= panelLeft && msg.Y >= 0 && msg.Y < vpHeight {
-				// Check if click is on a section header (expand/collapse toggle)
-				visualLine := msg.Y
+			if msg.X >= panelLeft && msg.Y >= bodyStartY && msg.Y < bodyStartY+vpHeight {
+				// visualLine = click Y - body start (0-based within panel)
+				visualLine := msg.Y - bodyStartY
 				unscrolledLine := visualLine + m.rightPanelScroll
-			if sectionID, ok := m.panelHeaderAtLine[unscrolledLine]; ok {
-				m.toggleSection(sectionID)
-				// Also update active tab to match clicked section
-				m.activeRightTab = sectionID
-				m.invalidateCache()
-				return m, nil
-			}
+				if sectionID, ok := m.panelHeaderAtLine[unscrolledLine]; ok {
+					m.toggleSection(sectionID)
+					m.activeRightTab = sectionID
+					m.invalidateCache()
+					return m, nil
+				}
 				m.focusZone = FocusPanel
 				return m, nil
 			}
 		}
 
-		// Click on main content area
-		m.focusZone = FocusMain
+		// Click on main content area (within body region)
+		if msg.Y >= bodyStartY && msg.Y < bodyStartY+vpHeight {
+			m.focusZone = FocusMain
+		}
 		return m, nil
 	}
 
@@ -1330,18 +1334,14 @@ func (m *Model) panelVisible(width int) bool {
 }
 
 // bodyHeight calculates the height available for the main content area.
-// Layout: body + prompt(4) — no header bar, no separate footer bar.
+// Layout: header(1) + body + prompt(3) + contextBar(1)
 func (m *Model) bodyHeight(height int) int {
-	h := height - promptAreaHeight
+	h := height - headerHeight - promptAreaHeight - contextBarHeight
 	if h < 5 {
 		h = 5
 	}
 	return h
 }
-
-// promptAreaHeight is the fixed height of the prompt+status area at the bottom.
-// 1 (spacer) + 1 (textarea border top) + 1 (textarea) + 1 (textarea border bottom / status row)
-const promptAreaHeight = 4
 
 // ─── View ────────────────────────────────────────────────────
 
@@ -1377,16 +1377,20 @@ func (m Model) View() string {
 		mainW = width
 	}
 
-	// Effective content width = mainW - margins
 	contentW := mainW - marginW*2
 	if contentW < 20 {
 		contentW = 20
 	}
 
 	margin := strings.Repeat(" ", marginW)
+	thin := lipgloss.NewStyle().Foreground(theme.Colors.Muted)
 	var b strings.Builder
 
-	// ── Body: main content area ──
+	// ── Header bar ──
+	b.WriteString(m.renderHeaderBar(width))
+	b.WriteString("\n")
+
+	// ── Body: main content + optional sidebar ──
 	if showPanel {
 		mainRendered := m.renderMainContent(contentW)
 		mainLines := strings.Split(mainRendered, "\n")
@@ -1394,7 +1398,6 @@ func (m Model) View() string {
 		panelRendered := m.renderRightPanel(panelW)
 		panelLines := strings.Split(panelRendered, "\n")
 
-		// Normalize both sides to vpHeight
 		for len(mainLines) < vpHeight {
 			mainLines = append(mainLines, "")
 		}
@@ -1408,9 +1411,8 @@ func (m Model) View() string {
 			panelLines = panelLines[:vpHeight]
 		}
 
-		divider := lipgloss.NewStyle().Foreground(theme.Colors.Muted).Render("│")
+		divider := thin.Render("│")
 		for i := 0; i < vpHeight; i++ {
-			// Left margin + main content (padded to contentW) + scrollbar + divider + panel
 			leftLine := mainLines[i]
 			padded := lipgloss.NewStyle().Width(contentW).Render(leftLine)
 			rightLine := panelLines[i]
@@ -1433,16 +1435,23 @@ func (m Model) View() string {
 			contentLines = contentLines[:vpHeight]
 		}
 		for i := 0; i < vpHeight; i++ {
-			line := contentLines[i]
-			padded := lipgloss.NewStyle().Width(contentW).Render(line)
+			padded := lipgloss.NewStyle().Width(contentW).Render(contentLines[i])
 			b.WriteString(margin)
 			b.WriteString(padded)
 			b.WriteString("\n")
 		}
 	}
 
-	// ── Prompt area (OpenCode style: border + textarea + status row) ──
+	// ── Separator ──
+	b.WriteString(thin.Render(strings.Repeat("─", width)))
+	b.WriteString("\n")
+
+	// ── Prompt area ──
 	b.WriteString(m.renderPromptArea(width))
+
+	// ── Context usage bar ──
+	b.WriteString("\n")
+	b.WriteString(m.renderContextBar(width))
 
 	finalView := replaceTabs(b.String())
 
@@ -1459,7 +1468,17 @@ func (m Model) View() string {
 	return finalView
 }
 
-// ─── Render header ──────────────────────────────────────────
+// promptAreaHeight is the fixed height of the prompt+status area at the bottom.
+// 1 (spacer) + 1 (input) + 1 (status row)
+const promptAreaHeight = 3
+
+// contextBarHeight is the fixed height of the context usage bar at the very bottom.
+const contextBarHeight = 1
+
+// headerHeight is the fixed height of the header bar at the top.
+const headerHeight = 1
+
+// ─── Render header (old, kept for reference) ────────────────
 
 func (m Model) renderHeader(hasPanel bool) string {
 	// Connection indicator (always visible)
@@ -1809,6 +1828,145 @@ func (m Model) renderPromptArea(width int) string {
 	return b.String()
 }
 
+// ─── Render header bar ───────────────────────────────────────
+// Shows: ● ExtendAI Lab ─ session-id ─ [connected]
+
+func (m Model) renderHeaderBar(width int) string {
+	thin := lipgloss.NewStyle().Foreground(theme.Colors.Muted)
+	sep := thin.Render(" ─ ")
+
+	// Left: connection dot + title
+	connColor := theme.Colors.Success
+	connText := "●"
+	if !m.serverConnected {
+		connColor = theme.Colors.Error
+		connText = "○"
+	}
+	left := lipgloss.NewStyle().Foreground(connColor).Render(connText) +
+		" " + lipgloss.NewStyle().Bold(true).Render("ExtendAI Lab")
+
+	// Session ID
+	if m.session != nil && m.session.ID != "" {
+		sid := m.session.ID
+		if utf8.RuneCountInString(sid) > 16 {
+			runes := []rune(sid)
+			sid = string(runes[:16]) + "…"
+		}
+		left += sep + lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(sid)
+	}
+
+	// AI status
+	if m.ai.IsWorking() {
+		spinner := m.ai.SpinnerFrame()
+		label := m.ai.Label
+		if label == "" {
+			label = string(m.ai.Status)
+		}
+		left += sep + lipgloss.NewStyle().Foreground(theme.Colors.Accent).Render(spinner+" "+label)
+	} else if m.ai.Status == protocol.AIError {
+		left += sep + lipgloss.NewStyle().Foreground(theme.Colors.Error).Render("✗ error")
+	}
+
+	// Right: model name
+	right := ""
+	if m.modelName != "" {
+		right = lipgloss.NewStyle().Foreground(theme.Colors.Secondary).Render(m.modelName)
+	}
+
+	// Fill
+	avail := width - marginW*2
+	fillLen := avail - lipgloss.Width(left) - lipgloss.Width(right)
+	if fillLen < 1 {
+		fillLen = 1
+	}
+
+	margin := strings.Repeat(" ", marginW)
+	return margin + lipgloss.NewStyle().Width(avail).Render(left+strings.Repeat(" ", fillLen)+right)
+}
+
+// ─── Render context usage bar ────────────────────────────────
+// Shows token usage by category with different colors:
+//   user 320 · asst 1.2K · tool 450 · sys 80   12% · 1.5K
+
+func (m Model) renderContextBar(width int) string {
+	if m.session == nil {
+		return ""
+	}
+
+	margin := strings.Repeat(" ", marginW)
+	msgs := m.session.GetMessages()
+
+	// Count tokens by role
+	var userTok, asstTok, toolTok, sysTok int
+	for _, msg := range msgs {
+		toks := utf8.RuneCountInString(msg.Content) / 4 // rough estimate
+		switch msg.Role {
+		case RoleUser:
+			userTok += toks
+		case RoleAssistant:
+			asstTok += toks
+		case RoleTool:
+			toolTok += toks
+		case RoleSystem, RoleError:
+			sysTok += toks
+		}
+	}
+	totalTok := userTok + asstTok + toolTok + sysTok
+
+	// Max tokens
+	maxTokens := 128000
+	if m.apiClient != nil && m.apiClient.Info() != nil && m.apiClient.Info().ContextLength > 0 {
+		maxTokens = m.apiClient.Info().ContextLength
+	}
+	pct := float64(totalTok) / float64(maxTokens) * 100
+	if pct > 100 {
+		pct = 100
+	}
+
+	// Build left side: colored token counts
+	dim := lipgloss.NewStyle().Foreground(theme.Colors.TextDim)
+	parts := []string{}
+	if userTok > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(theme.Colors.TextUser).Render(
+			fmt.Sprintf("user %s", formatTokenK(userTok))))
+	}
+	if asstTok > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(theme.Colors.Text).Render(
+			fmt.Sprintf("asst %s", formatTokenK(asstTok))))
+	}
+	if toolTok > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(theme.Colors.Warning).Render(
+			fmt.Sprintf("tool %s", formatTokenK(toolTok))))
+	}
+	if sysTok > 0 {
+		parts = append(parts, dim.Render(
+			fmt.Sprintf("sys %s", formatTokenK(sysTok))))
+	}
+	left := strings.Join(parts, dim.Render(" · "))
+
+	// Build right side: percentage + total
+	pctColor := theme.Colors.Success
+	if pct >= 85 {
+		pctColor = theme.Colors.Warning
+	}
+	if pct >= 95 {
+		pctColor = theme.Colors.Error
+	}
+	right := lipgloss.NewStyle().Foreground(pctColor).Render(
+		fmt.Sprintf("%.0f%%", pct)) +
+		dim.Render(" · ") +
+		dim.Render(formatTokenK(totalTok))
+
+	// Layout
+	avail := width - marginW*2
+	fillLen := avail - lipgloss.Width(left) - lipgloss.Width(right)
+	if fillLen < 1 {
+		fillLen = 1
+	}
+	row := left + strings.Repeat(" ", fillLen) + right
+	return margin + lipgloss.NewStyle().Width(avail).Render(row)
+}
+
 // ─── Render right panel ─────────────────────────────────────
 
 func (m *Model) renderRightPanel(width int) string {
@@ -1823,11 +1981,7 @@ func (m *Model) renderRightPanel(width int) string {
 
 	y := 0
 
-	// ── Tab bar at top (shows all sections, highlights active) ──
-	sectionLines = append(sectionLines, m.renderPanelTabs(width-2))
-	y++
-
-	// ── Iterate over registered sidebar sections ──
+	// ── Iterate over registered sidebar sections (no tab bar) ──
 	for _, s := range GetSidebarSections() {
 		expanded := m.panelSections[s.ID]
 		header := m.renderSectionHeader(s.Label, expanded, "")
