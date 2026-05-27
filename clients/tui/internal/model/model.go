@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1828,14 +1829,33 @@ func (m Model) renderPromptArea(width int) string {
 	leftStatus := strings.Join(statusParts, "  ")
 	rightInfo := strings.Join(rightParts, "  ")
 	avail := width - marginW*2
-	fillLen := avail - lipgloss.Width(leftStatus) - lipgloss.Width(rightInfo)
-	if fillLen < 1 {
-		fillLen = 1
-	}
 
-	statusRow := leftStatus + strings.Repeat(" ", fillLen) + rightInfo
-	b.WriteString(margin)
-	b.WriteString(lipgloss.NewStyle().Width(avail).Render(statusRow))
+	// Water-spout wave animation (CodeWhale style) when AI is working
+	if m.ai.IsWorking() {
+		waveWidth := avail - lipgloss.Width(leftStatus) - lipgloss.Width(rightInfo) - 4
+		if waveWidth > 10 {
+			wave := renderWaterSpout(waveWidth)
+			statusRow := leftStatus + "  " + wave + "  " + rightInfo
+			b.WriteString(margin)
+			b.WriteString(lipgloss.NewStyle().Width(avail).Render(statusRow))
+		} else {
+			fillLen := avail - lipgloss.Width(leftStatus) - lipgloss.Width(rightInfo)
+			if fillLen < 1 {
+				fillLen = 1
+			}
+			statusRow := leftStatus + strings.Repeat(" ", fillLen) + rightInfo
+			b.WriteString(margin)
+			b.WriteString(lipgloss.NewStyle().Width(avail).Render(statusRow))
+		}
+	} else {
+		fillLen := avail - lipgloss.Width(leftStatus) - lipgloss.Width(rightInfo)
+		if fillLen < 1 {
+			fillLen = 1
+		}
+		statusRow := leftStatus + strings.Repeat(" ", fillLen) + rightInfo
+		b.WriteString(margin)
+		b.WriteString(lipgloss.NewStyle().Width(avail).Render(statusRow))
+	}
 
 	return b.String()
 }
@@ -2339,6 +2359,35 @@ func loadOrCreateSession(cwd string) *Session {
 
 // replaceTabs replaces tab characters with spaces in the rendered output.
 // This prevents alignment issues in terminals where tabs render at fixed stops.
+// renderWaterSpout generates a CodeWhale-style wave animation.
+// Uses ▁▂▃▄▅▆▇█ glyphs with a sine wave formula.
+func renderWaterSpout(width int) string {
+	if width < 1 {
+		return ""
+	}
+	waveChars := []rune("▁▂▃▄▅▆▇█")
+	t := float64(time.Now().UnixMilli()) / 1000.0 // time in seconds
+
+	var b strings.Builder
+	for i := 0; i < width; i++ {
+		x := float64(i)
+		// Sine wave formula (CodeWhale style)
+		primary := 0.5 + 0.5*math.Sin(x*0.52-t*8.0)
+		swell := 0.35 * math.Sin(x*0.18+t*3.1)
+		shimmer := 0.12 * math.Sin(x*1.35-t*11.0)
+		val := primary + swell + shimmer
+		if val < 0 {
+			val = 0
+		}
+		if val > 1 {
+			val = 1
+		}
+		idx := int(val * float64(len(waveChars)-1))
+		b.WriteRune(waveChars[idx])
+	}
+	return lipgloss.NewStyle().Foreground(theme.Colors.Secondary).Render(b.String())
+}
+
 // toolFamilyGlyph returns a CodeWhale-style family glyph for a tool name.
 // ▷ read  ◆ patch  ▶ run  ⌕ find  ◐ delegate  ⋮⋮ fanout  • generic
 func toolFamilyGlyph(toolName string) string {
