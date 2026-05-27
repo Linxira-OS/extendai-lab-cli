@@ -1394,19 +1394,32 @@ func (m Model) View() string {
 	// ── Body: main content + optional sidebar ──
 	if showPanel {
 		mainRendered := m.renderMainContent(contentW)
-		mainLines := strings.Split(mainRendered, "\n")
+		allMainLines := strings.Split(mainRendered, "\n")
 
 		panelRendered := m.renderRightPanel(panelW)
 		panelLines := strings.Split(panelRendered, "\n")
 
+		// Apply viewport scroll offset to main content
+		scrollOffset := m.viewport.YOffset
+		if scrollOffset < 0 {
+			scrollOffset = 0
+		}
+		if scrollOffset > len(allMainLines)-vpHeight {
+			scrollOffset = len(allMainLines) - vpHeight
+		}
+		if scrollOffset < 0 {
+			scrollOffset = 0
+		}
+		mainLines := allMainLines[scrollOffset:]
+		if len(mainLines) > vpHeight {
+			mainLines = mainLines[:vpHeight]
+		}
 		for len(mainLines) < vpHeight {
 			mainLines = append(mainLines, "")
 		}
+
 		for len(panelLines) < vpHeight {
 			panelLines = append(panelLines, "")
-		}
-		if len(mainLines) > vpHeight {
-			mainLines = mainLines[:vpHeight]
 		}
 		if len(panelLines) > vpHeight {
 			panelLines = panelLines[:vpHeight]
@@ -1415,8 +1428,6 @@ func (m Model) View() string {
 		divider := thin.Render("│")
 		for i := 0; i < vpHeight; i++ {
 			leftLine := mainLines[i]
-			// CRITICAL: truncate to contentW to prevent terminal line-wrap
-			// which would desync left/right columns
 			leftLine = truncateToWidth(leftLine, contentW)
 			padded := lipgloss.NewStyle().Width(contentW).Render(leftLine)
 			rightLine := panelLines[i]
@@ -1431,12 +1442,25 @@ func (m Model) View() string {
 		}
 	} else {
 		content := m.renderMainContent(contentW)
-		contentLines := strings.Split(content, "\n")
-		for len(contentLines) < vpHeight {
-			contentLines = append(contentLines, "")
+		allLines := strings.Split(content, "\n")
+
+		// Apply viewport scroll offset
+		scrollOffset := m.viewport.YOffset
+		if scrollOffset < 0 {
+			scrollOffset = 0
 		}
+		if scrollOffset > len(allLines)-vpHeight {
+			scrollOffset = len(allLines) - vpHeight
+		}
+		if scrollOffset < 0 {
+			scrollOffset = 0
+		}
+		contentLines := allLines[scrollOffset:]
 		if len(contentLines) > vpHeight {
 			contentLines = contentLines[:vpHeight]
+		}
+		for len(contentLines) < vpHeight {
+			contentLines = append(contentLines, "")
 		}
 		for i := 0; i < vpHeight; i++ {
 			line := truncateToWidth(contentLines[i], contentW)
@@ -1752,6 +1776,18 @@ func (m *Model) renderMainContent(width int) string {
 	fullContent := strings.Join(contentLines, "\n")
 	m.cachedMain = fullContent
 	m.viewport.SetContent(fullContent)
+
+	// Auto-scroll to bottom when AI is working (streaming/thinking)
+	if m.ai.IsWorking() {
+		totalLines := len(contentLines)
+		if m.viewport.YOffset < totalLines-m.viewport.Height {
+			m.viewport.YOffset = totalLines - m.viewport.Height
+		}
+		if m.viewport.YOffset < 0 {
+			m.viewport.YOffset = 0
+		}
+	}
+
 	return fullContent
 }
 
