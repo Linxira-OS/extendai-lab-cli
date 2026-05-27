@@ -131,7 +131,10 @@ func (c *Client) Discover() error {
 // OpenAI's standard response only has id/object/owned_by, so we enrich
 // with sensible defaults.
 func (c *Client) discoverOpenAI() (*ModelInfo, error) {
-	req, err := http.NewRequest(http.MethodGet, c.baseURL+"/models", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +190,10 @@ func (c *Client) discoverLMStudio() (*ModelInfo, error) {
 		return nil, fmt.Errorf("cannot build LM Studio URL")
 	}
 
-	req, err := http.NewRequest(http.MethodGet, lmURL+"/api/v1/models", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, lmURL+"/api/v1/models", nil)
 	if err != nil {
 		return nil, err
 	}

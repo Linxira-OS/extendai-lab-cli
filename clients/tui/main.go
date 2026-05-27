@@ -27,10 +27,12 @@ func main() {
 	if ipcClient == nil {
 		aiClient = api.NewFromEnv()
 		if aiClient != nil {
-			// Discover model capabilities from provider
-			if err := aiClient.Discover(); err != nil {
-				fmt.Fprintf(os.Stderr, "API discovery warning: %v\n", err)
-			}
+			// Discover model capabilities from provider in background
+			go func() {
+				if err := aiClient.Discover(); err != nil {
+					// fmt.Fprintf(os.Stderr, "API discovery warning: %v\n", err)
+				}
+			}()
 		}
 	}
 

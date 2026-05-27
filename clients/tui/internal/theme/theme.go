@@ -316,8 +316,8 @@ func recalcStyles() {
 	TabActiveStyle = lipgloss.NewStyle().
 		Background(Colors.Primary).
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Padding(0, 1).
-		Bold(true)
+		Bold(true).
+		Padding(0, 1)
 
 	TabInactiveStyle = lipgloss.NewStyle().
 		Background(Colors.Surface).

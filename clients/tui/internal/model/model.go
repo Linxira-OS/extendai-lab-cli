@@ -119,6 +119,9 @@ type Model struct {
 	// Main viewport
 	viewport viewport.Model
 
+	// Sidebar layout
+	sidebarLayout *SidebarLayout
+
 	// Session tree (persistent conversation storage)
 	session *Session
 	// Startup session picker
@@ -137,7 +140,8 @@ type Model struct {
 	rightPanelHeight   int
 	rightPanelContent  string
 	panelRenderCmd     *protocol.Component // the side-panel component from TS
-	panelSections      map[string]bool    // section name -> expanded (mcp/lsp/todo/files)
+	panelSections      map[string]bool    // section name -> expanded (mcp/lsp/todo/files/context/session)
+	panelHeaderAtLine  map[int]string     // unscrolled line index -> section ID for mouse-click detection
 
 	// IPC client (TS server)
 	client *ipc.Client
@@ -170,15 +174,21 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 		client:   client,
 		apiClient: aiClient,
 		panelMode: "auto", // always auto-show when wide enough
-		rightTabIDs: []string{"lsp", "files", "todo", "session"},
-		activeRightTab: "session",
-		panelSections: map[string]bool{
-			"mcp":     true,   // expanded by default
-			"lsp":     true,
-			"todo":    false,
-			"files":   false,
-			"session": true,   // expanded by default
-		},
+	}
+
+	m.panelHeaderAtLine = make(map[int]string)
+	m.sidebarLayout = NewSidebarLayout()
+
+	// Derive rightTabIDs and panelSections from registered sidebar sections.
+	sections := GetSidebarSections()
+	m.rightTabIDs = make([]string, len(sections))
+	m.panelSections = make(map[string]bool, len(sections))
+	for i, s := range sections {
+		m.rightTabIDs[i] = s.ID
+		m.panelSections[s.ID] = s.ExpandByDefault
+	}
+	if len(sections) > 0 {
+		m.activeRightTab = sections[0].ID
 	}
 
 	// In standalone mode, set the model name from the API client
@@ -798,18 +808,15 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseLeft:
-		// Click detection for input focus
-		// Input is at the bottom of the screen
-		// Layout: header(1) + sep(1) + viewport(vpHeight) + input(3) + footer(3)
+		// Layout: header(1) + sep(1) + body(vpHeight) + input(3) + sep(1) + footer(1)
 		headerHeight := 1
-		footerHeight := 3
-		inputHeight := 3
 		sepLines := 1
-		vpHeight := theme.TermHeight - headerHeight - footerHeight - inputHeight - sepLines - 2
+		vpHeight := m.bodyHeight(theme.TermHeight)
+		panelTopY := headerHeight + sepLines
 
-		inputStartY := headerHeight + sepLines + vpHeight + 1 // +1 for spacing
+		inputStartY := panelTopY + vpHeight // input starts right after body
 
-		if msg.Y >= inputStartY && msg.Y < inputStartY+inputHeight {
+		if msg.Y >= inputStartY && msg.Y < inputStartY+inputBoxHeight {
 			// Click on input area → focus input
 			m.focusZone = FocusInput
 			m.inputFocused = true
@@ -818,8 +825,24 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 		// Click on right panel area
 		if m.panelVisible(theme.TermWidth) {
-			panelLeft := theme.TermWidth - panelWidthMax
-			if msg.X >= panelLeft && msg.Y >= headerHeight+sepLines && msg.Y < headerHeight+sepLines+vpHeight {
+			// Compute the actual panel width the same way View() does
+			actualPanelW := panelWidthMax
+			if actualPanelW > theme.TermWidth-60 {
+				actualPanelW = theme.TermWidth - 60
+			}
+			if actualPanelW < panelWidthMin {
+				actualPanelW = panelWidthMin
+			}
+			panelLeft := theme.TermWidth - actualPanelW
+			if msg.X >= panelLeft && msg.Y >= panelTopY && msg.Y < panelTopY+vpHeight {
+				// Check if click is on a section header (expand/collapse toggle)
+				visualLine := msg.Y - panelTopY // 0-based within visible panel
+				unscrolledLine := visualLine + m.rightPanelScroll
+				if sectionID, ok := m.panelHeaderAtLine[unscrolledLine]; ok {
+					m.toggleSection(sectionID)
+					m.invalidateCache()
+					return m, nil
+				}
 				m.focusZone = FocusPanel
 				return m, nil
 			}
@@ -835,8 +858,6 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 // ─── Section cycling ─────────────────────────────────────────
 
-var sectionOrder = []string{"mcp", "lsp", "todo", "files", "session"}
-
 func (m *Model) toggleSection(id string) {
 	if _, ok := m.panelSections[id]; ok {
 		m.panelSections[id] = !m.panelSections[id]
@@ -845,19 +866,23 @@ func (m *Model) toggleSection(id string) {
 }
 
 func (m *Model) cycleSection(dir int) {
+	sections := GetSidebarSections()
+	if len(sections) == 0 {
+		return
+	}
 	current := -1
-	for i, id := range sectionOrder {
-		if id == m.activeRightTab {
+	for i, s := range sections {
+		if s.ID == m.activeRightTab {
 			current = i
 			break
 		}
 	}
 	if current < 0 {
-		m.activeRightTab = sectionOrder[0]
+		m.activeRightTab = sections[0].ID
 		return
 	}
-	next := (current + dir + len(sectionOrder)) % len(sectionOrder)
-	m.activeRightTab = sectionOrder[next]
+	next := (current + dir + len(sections)) % len(sections)
+	m.activeRightTab = sections[next].ID
 	m.rightPanelScroll = 0
 }
 
@@ -1244,6 +1269,13 @@ Focus:
 			return "Available themes: " + strings.Join(theme.ThemeNames, ", ")
 		}
 		return "Current theme: " + theme.ThemeDisplayName(theme.CurrentTheme) + "\nAvailable: " + strings.Join(theme.ThemeNames, ", ")
+	case "debug":
+		var hdrLines []string
+		for y, id := range m.panelHeaderAtLine {
+			hdrLines = append(hdrLines, fmt.Sprintf("  y=%d → %s", y, id))
+		}
+		return fmt.Sprintf("Panel debug:\n  rightPanelHeight=%d\n  rightPanelScroll=%d\n  panelMode=%s\n  focusZone=%d\n  panelSections=%v\n  panelHeaderAtLine(%d entries):\n%s",
+			m.rightPanelHeight, m.rightPanelScroll, m.panelMode, m.focusZone, m.panelSections, len(m.panelHeaderAtLine), strings.Join(hdrLines, "\n"))
 	case "exit", "quit", "q":
 		return "Press Ctrl+C to quit."
 	default:
@@ -1276,8 +1308,8 @@ func (m *Model) panelVisible(width int) bool {
 
 // bodyHeight calculates the height available for the main content area.
 func (m *Model) bodyHeight(height int) int {
-	// header(1) + sep(1) + body + input(3) + statusLine(1) + sep(1) + footer(3)
-	h := height - 1 - sepHeight - inputBoxHeight - 1 - sepHeight - 3
+	// header(1) + sep(1) + body + input(3) + sep(1) + footer(1)
+	h := height - 1 - sepHeight - inputBoxHeight - sepHeight - 1
 	if h < 5 {
 		h = 5
 	}
@@ -1323,7 +1355,7 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	// ── Header bar (1 line) ──
-	b.WriteString(m.renderHeader(mainW, showPanel))
+	b.WriteString(m.renderHeader(showPanel))
 	b.WriteString("\n")
 
 	// ── Separator ──
@@ -1457,7 +1489,7 @@ func (m Model) View() string {
 
 // ─── Render header ──────────────────────────────────────────
 
-func (m Model) renderHeader(mainWidth int, hasPanel bool) string {
+func (m Model) renderHeader(hasPanel bool) string {
 	// Connection indicator (always visible)
 	connColor := theme.Colors.Success
 	connText := "●"
@@ -1532,7 +1564,7 @@ func (m Model) renderHeader(mainWidth int, hasPanel bool) string {
 	if avail < 10 {
 		avail = 10
 	}
-	fillLen := avail - len(leftText) - len(rightText)
+	fillLen := avail - lipgloss.Width(leftText) - lipgloss.Width(rightText)
 	if fillLen < 1 {
 		fillLen = 1
 	}
@@ -1541,218 +1573,11 @@ func (m Model) renderHeader(mainWidth int, hasPanel bool) string {
 	return theme.HeaderStyle.Render(leftText + fill + rightText)
 }
 
-// ─── Render status line ──────────────────────────────────
-
-func (m Model) renderStatusLine(width int) string {
-	var leftParts, rightParts []string
-
-	// Left: model name + conversation count
-	if m.modelName != "" {
-		leftParts = append(leftParts,
-			lipgloss.NewStyle().Foreground(theme.Colors.Secondary).Render("agent:"),
-			lipgloss.NewStyle().Foreground(theme.Colors.Text).Render(m.modelName))
-	}
-	// Message count
-	if m.session != nil {
-		msgCount := m.session.GetMessageCount()
-		if msgCount > 0 {
-			leftParts = append(leftParts,
-				lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(fmt.Sprintf(" msgs:%d", msgCount)))
-		}
-	}
-
-	// Right: MCP / LSP counts
-	if m.mcpCount > 0 {
-		mcpColor := theme.Colors.Success
-		if m.mcpError {
-			mcpColor = theme.Colors.Error
-		}
-		rightParts = append(rightParts,
-			lipgloss.NewStyle().Foreground(mcpColor).Render(fmt.Sprintf("MCP:%d", m.mcpCount)))
-	}
-	if m.lspCount > 0 {
-		rightParts = append(rightParts,
-			lipgloss.NewStyle().Foreground(theme.Colors.Success).Render(fmt.Sprintf("LSP:%d", m.lspCount)))
-	}
-
-	leftText := strings.Join(leftParts, " ")
-	rightText := strings.Join(rightParts, "  ")
-
-	avail := width - 4
-	if avail < 10 {
-		avail = 10
-	}
-	fillLen := avail - len(leftText) - len(rightText)
-	if fillLen < 1 {
-		fillLen = 1
-	}
-	fill := strings.Repeat(" ", fillLen)
-
-	return lipgloss.NewStyle().
-		Width(width).
-		Foreground(theme.Colors.TextDim).
-		Render(leftText + fill + rightText)
-}
-
 // ─── Render footer ─────────────────────────────────────────
+// Footer rendering is in footer.go (FooterProps pattern)
 
-func (m Model) renderFooter(width int) string {
-	// Footer is a dedicated bottom panel: status row + context rows + legend row.
-	// This matches the design doc's footer/context visualization intent.
-
-	// Row 1: session / system status
-	dir := m.currentDir
-	if dir == "" {
-		dir = "~"
-	}
-	dotColor := theme.Colors.Success
-	if !m.serverConnected {
-		dotColor = theme.Colors.Error
-	}
-	themeName := theme.ThemeDisplayName(theme.CurrentTheme)
-	left := lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(dir)
-	center := lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(
-		fmt.Sprintf("MCP:%d  LSP:%d  P:%d", m.mcpCount, m.lspCount, m.permissionCount),
-	)
-	right := lipgloss.NewStyle().Foreground(dotColor).Render("●") + " " +
-		lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(themeName)
-	row1 := theme.FooterStyle.Render(m.footerThreeCols(width, left, center, right))
-
-	// Row 2: multi-bar context visualization (role-based usage)
-	row2 := m.renderContextUsagePanel(width)
-
-	// Row 3: legend / totals
-	row3 := m.renderContextLegend(width)
-
-	return strings.Join([]string{row1, row2, row3}, "\n")
-}
-
-func (m Model) footerThreeCols(width int, left, center, right string) string {
-	avail := width - 2
-	if avail < 30 {
-		avail = 30
-	}
-	leftW := avail * 26 / 100
-	rightW := avail * 24 / 100
-	centerW := avail - leftW - rightW
-	if leftW < 10 {
-		leftW = 10
-	}
-	if rightW < 10 {
-		rightW = 10
-	}
-	if centerW < 10 {
-		centerW = 10
-	}
-	return lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		lipgloss.NewStyle().Width(leftW).MaxWidth(leftW).Render(m.truncStr(left, leftW)),
-		lipgloss.NewStyle().Width(centerW).MaxWidth(centerW).Align(lipgloss.Center).Render(m.truncStr(center, centerW)),
-		lipgloss.NewStyle().Width(rightW).MaxWidth(rightW).Align(lipgloss.Right).Render(m.truncStr(right, rightW)),
-	)
-}
-
-func (m *Model) renderContextUsagePanel(width int) string {
-	if m.session == nil {
-		return theme.FooterStyle.Render("")
-	}
-
-	type stat struct {
-		role  string
-		name  string
-		color lipgloss.Color
-		count int
-		chars int
-	}
-
-	stats := []stat{
-		{role: RoleSystem, name: "system", color: theme.Colors.Primary},
-		{role: RoleUser, name: "user", color: theme.Colors.Success},
-		{role: RoleAssistant, name: "assistant", color: theme.Colors.Accent},
-		{role: RoleTool, name: "tool", color: theme.Colors.Warning},
-		{role: RoleError, name: "error", color: theme.Colors.Error},
-	}
-	idx := map[string]int{}
-	for i := range stats {
-		idx[stats[i].role] = i
-	}
-	for _, msg := range m.session.GetMessages() {
-		if i, ok := idx[msg.Role]; ok {
-			stats[i].count++
-			stats[i].chars += len(msg.Content)
-		}
-	}
-	total := 0
-	for _, s := range stats {
-		total += s.chars
-	}
-	if total == 0 {
-		return theme.FooterStyle.Render(m.footerPanelLine(width, "Context", "empty", ""))
-	}
-
-	barWidth := width - 18
-	if barWidth < 20 {
-		barWidth = 20
-	}
-	var parts []string
-	used := 0
-	for i, s := range stats {
-		if s.chars == 0 {
-			continue
-		}
-		segW := s.chars * barWidth / total
-		if segW < 1 {
-			segW = 1
-		}
-		if i == len(stats)-1 {
-			segW = barWidth - used
-		}
-		if segW < 1 {
-			segW = 1
-		}
-		used += segW
-		bar := lipgloss.NewStyle().Foreground(s.color).Render(strings.Repeat("█", segW))
-		pct := (s.chars * 100) / total
-		label := lipgloss.NewStyle().Foreground(s.color).Render(fmt.Sprintf(" %s %d%%", s.name, pct))
-		parts = append(parts, bar+label)
-	}
-	line := strings.Join(parts, "  ")
-	return theme.FooterStyle.Render(m.truncStr(line, width-2))
-}
-
-func (m *Model) renderContextLegend(width int) string {
-	if m.session == nil {
-		return theme.FooterStyle.Render("")
-	}
-	total := 0
-	var sys, usr, asst, tool, other int
-	for _, msg := range m.session.GetMessages() {
-		n := len(msg.Content)
-		total += n
-		switch msg.Role {
-		case RoleSystem:
-			sys += n
-		case RoleUser:
-			usr += n
-		case RoleAssistant:
-			asst += n
-		case RoleTool:
-			tool += n
-		default:
-			other += n
-		}
-	}
-	if total == 0 {
-		return theme.FooterStyle.Render("")
-	}
-	msg := fmt.Sprintf("sys %d%% · usr %d%% · asst %d%% · tool %d%% · other %d%% · total %d",
-		sys*100/total, usr*100/total, asst*100/total, tool*100/total, other*100/total, total)
-	return theme.FooterStyle.Render(lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(m.truncStr(msg, width-2)))
-}
-
-func (m *Model) footerPanelLine(width int, left, center, right string) string {
-	return m.footerThreeCols(width, left, center, right)
-}
+// ─── Render context sidebar ────────────────────────────────
+// Context sidebar rendering is in context_inspector.go
 
 // truncStr truncates s to at most maxLen runes, appending "…" if cut.
 func (m Model) truncStr(s string, maxLen int) string {
@@ -1781,10 +1606,11 @@ func (m *Model) renderMainContent(width int) string {
 	if m.session != nil {
 		msgs := m.session.GetMessages()
 		for i, msg := range msgs {
-			// Determine brightness style
-			brightStyle := lipgloss.NewStyle()
+			// Determine dim style for thinking/tool messages.
+			// Use italic + TextDim instead of Faint(true) for cross-terminal readability.
+			dimStyle := lipgloss.NewStyle()
 			if msg.Brightness == BrightnessDim {
-				brightStyle = brightStyle.Faint(true)
+				dimStyle = dimStyle.Italic(true).Foreground(theme.Colors.TextDim)
 			}
 
 			switch msg.Role {
@@ -1799,9 +1625,9 @@ func (m *Model) renderMainContent(width int) string {
 					mdWidth = 20
 				}
 				rendered := renderer.RenderMarkdown(msg.Content, mdWidth)
-				// Apply brightness
+				// Apply dim style for thinking messages
 				if msg.Brightness == BrightnessDim {
-					rendered = brightStyle.Render(rendered)
+					rendered = dimStyle.Render(rendered)
 				}
 				contentLines = append(contentLines, rendered)
 
@@ -1836,13 +1662,19 @@ func (m *Model) renderMainContent(width int) string {
 				toolHeader := lipgloss.NewStyle().
 					Foreground(theme.Colors.Muted).
 					Render("Tool: " + msg.ToolName)
-				contentLines = append(contentLines, brightStyle.Render(toolHeader))
+				if msg.Brightness == BrightnessDim {
+					toolHeader = dimStyle.Render(toolHeader)
+				}
+				contentLines = append(contentLines, toolHeader)
 				mdWidth := width - 4
 				if mdWidth < 20 {
 					mdWidth = 20
 				}
 				rendered := renderer.RenderMarkdown(msg.Content, mdWidth)
-				contentLines = append(contentLines, brightStyle.Render(rendered))
+				if msg.Brightness == BrightnessDim {
+					rendered = dimStyle.Render(rendered)
+				}
+				contentLines = append(contentLines, rendered)
 
 			case RoleError:
 				contentLines = append(contentLines, theme.ErrorStyle.Render(msg.Content))
@@ -1906,91 +1738,30 @@ func (m *Model) renderRightPanel(width int) string {
 	contentWidth := width - 4 // padding on both sides
 
 	var sectionLines []string
+	// IMPORTANT: Clear map in-place, do NOT reassign.
+	// View() has a value receiver; reassigning changes only the copy's pointer.
+	for k := range m.panelHeaderAtLine {
+		delete(m.panelHeaderAtLine, k)
+	}
+
+	y := 0
 
 	// ── Tab bar at top (shows all sections, highlights active) ──
 	sectionLines = append(sectionLines, m.renderPanelTabs(width-2))
+	y++
 
-	// ── MCP section ──
-	{
-		expanded := m.panelSections["mcp"]
-		var summary string
-		if len(m.mcpList) > 0 {
-			connected := 0
-			for _, mcp := range m.mcpList {
-				if mcp.Status == "connected" {
-					connected++
-				}
-			}
-			summary = fmt.Sprintf("(%d/%d) ", connected, len(m.mcpList))
-		}
-		header := m.renderSectionHeader("MCP", expanded, summary)
+	// ── Iterate over registered sidebar sections ──
+	for _, s := range GetSidebarSections() {
+		expanded := m.panelSections[s.ID]
+		header := m.renderSectionHeader(s.Label, expanded, "")
+		m.panelHeaderAtLine[y] = s.ID
 		sectionLines = append(sectionLines, header)
+		y++
 		if expanded {
-			content := m.renderMCPTab(contentWidth)
+			content := s.Render(m, contentWidth)
 			for _, line := range strings.Split(content, "\n") {
-				sectionLines = append(sectionLines, theme.PanelStyle.Render(line))
-			}
-		}
-	}
-
-	// ── LSP section ──
-	{
-		expanded := m.panelSections["lsp"]
-		var summary string
-		if len(m.lspList) > 0 {
-			errCount := 0
-			for _, lsp := range m.lspList {
-				if lsp.Status == "error" {
-					errCount++
-				}
-			}
-			summary = fmt.Sprintf("(%d err) ", errCount)
-		}
-		header := m.renderSectionHeader("LSP", expanded, summary)
-		sectionLines = append(sectionLines, header)
-		if expanded {
-			content := m.renderLSPTab(contentWidth)
-			for _, line := range strings.Split(content, "\n") {
-				sectionLines = append(sectionLines, theme.PanelStyle.Render(line))
-			}
-		}
-	}
-
-	// ── TODO section ──
-	{
-		expanded := m.panelSections["todo"]
-		header := m.renderSectionHeader("TODO", expanded, "")
-		sectionLines = append(sectionLines, header)
-		if expanded {
-			content := m.renderTodoTab(contentWidth)
-			for _, line := range strings.Split(content, "\n") {
-				sectionLines = append(sectionLines, theme.PanelStyle.Render(line))
-			}
-		}
-	}
-
-	// ── Files section ──
-	{
-		expanded := m.panelSections["files"]
-		header := m.renderSectionHeader("Files", expanded, "")
-		sectionLines = append(sectionLines, header)
-		if expanded {
-			content := m.renderFilesTab(contentWidth)
-			for _, line := range strings.Split(content, "\n") {
-				sectionLines = append(sectionLines, theme.PanelStyle.Render(line))
-			}
-		}
-	}
-
-	// ── Session section ──
-	{
-		expanded := m.panelSections["session"]
-		header := m.renderSectionHeader("Session", expanded, "")
-		sectionLines = append(sectionLines, header)
-		if expanded {
-			content := m.renderSessionTab(contentWidth)
-			for _, line := range strings.Split(content, "\n") {
-				sectionLines = append(sectionLines, theme.PanelStyle.Render(line))
+				sectionLines = append(sectionLines, line)
+				y++
 			}
 		}
 	}
@@ -2009,7 +1780,7 @@ func (m *Model) renderRightPanel(width int) string {
 		visible = visible[:m.rightPanelHeight]
 	}
 
-	// Wrap in panel style
+	// Wrap in panel style (Padding(0,1) adds one space left + right)
 	return theme.PanelStyle.Width(width).Render(strings.Join(visible, "\n"))
 }
 
@@ -2035,66 +1806,31 @@ func (m *Model) renderSectionHeader(name string, expanded bool, summary string) 
 
 // sectionIDByName maps section display names to internal IDs.
 func (m *Model) sectionIDByName(name string) string {
-	switch name {
-	case "MCP":
-		return "mcp"
-	case "LSP":
-		return "lsp"
-	case "TODO":
-		return "todo"
-	case "Files":
-		return "files"
-	case "Session":
-		return "session"
+	for _, s := range GetSidebarSections() {
+		if s.Label == name {
+			return s.ID
+		}
 	}
 	return ""
 }
 
 // renderPanelTabs renders the tab bar at the top of the right panel.
 func (m *Model) renderPanelTabs(width int) string {
-	if len(m.rightTabIDs) == 0 {
+	sections := GetSidebarSections()
+	if len(sections) == 0 {
 		return ""
 	}
 
-	tabNames := map[string]string{
-		"lsp":     "LSP",
-		"files":   "Files",
-		"todo":    "TODO",
-		"mcp":     "MCP",
-		"session": "Session",
-	}
-
 	var tabStrs []string
-	for _, id := range m.rightTabIDs {
-		name := id
-		if n, ok := tabNames[id]; ok {
-			name = n
-		}
-		if id == m.activeRightTab {
+	for _, s := range sections {
+		name := s.Label
+		if s.ID == m.activeRightTab {
 			tabStrs = append(tabStrs, theme.TabActiveStyle.Render(name))
 		} else {
 			tabStrs = append(tabStrs, theme.TabInactiveStyle.Render(name))
 		}
 	}
 	return theme.TabBarStyle.Width(width).Render(strings.Join(tabStrs, ""))
-}
-
-// renderActiveTabContent renders content for the currently active right-panel tab.
-func (m *Model) renderActiveTabContent(width int) string {
-	switch m.activeRightTab {
-	case "lsp":
-		return m.renderLSPTab(width)
-	case "files":
-		return m.renderFilesTab(width)
-	case "todo":
-		return m.renderTodoTab(width)
-	case "mcp":
-		return m.renderMCPTab(width)
-	case "session":
-		return m.renderSessionTab(width)
-	default:
-		return ""
-	}
 }
 
 // renderLSPTab shows language server status.

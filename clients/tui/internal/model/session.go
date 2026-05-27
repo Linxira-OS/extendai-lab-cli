@@ -324,16 +324,13 @@ func (s *Session) Fork(cwd string) *Session {
 // ─── Persistence (JSONL) ─────────────────────────────────────
 
 // SessionDir returns the default session storage directory.
+// Uses cross-platform paths (see paths.go for details).
 func SessionDir() (string, error) {
-	home, err := os.UserHomeDir()
+	paths, err := GetPaths()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".extendai", "sessions")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return paths.Sessions, nil
 }
 
 // Save persists the session to a JSONL file.
@@ -435,8 +432,13 @@ func LoadSession(path string) (*Session, error) {
 		s.byID[entry.ID] = &entry
 		s.entries = append(s.entries, &entry)
 
+		// Track leaf entry - use TargetID if available, otherwise use entry ID
 		if entry.Type == EntryTypeLeaf {
-			s.leafID = entry.ID
+			if entry.TargetID != "" {
+				s.leafID = entry.TargetID
+			} else {
+				s.leafID = entry.ID
+			}
 		}
 	}
 
