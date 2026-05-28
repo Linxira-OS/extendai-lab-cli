@@ -264,6 +264,83 @@ func (r *ToolRegistry) registerBuiltinTools() {
 	}
 }
 
+// ─── Tool Result Budget ────────────────────────────────────────
+
+// ToolResultBudget defines the maximum size for tool results.
+type ToolResultBudget struct {
+	MaxTokens  int // maximum tokens for a single tool result
+	MaxChars   int // maximum characters (fallback if token estimation unavailable)
+	Truncation string // truncation message
+}
+
+// DefaultToolResultBudget returns sensible defaults.
+func DefaultToolResultBudget() ToolResultBudget {
+	return ToolResultBudget{
+		MaxTokens:  4000, // ~16KB of text
+		MaxChars:   16000,
+		Truncation: "\n\n... (truncated to fit context budget)",
+	}
+}
+
+// ApplyToolResultBudget truncates a tool result to fit within the budget.
+// Uses token-aware truncation when possible, falls back to character count.
+func ApplyToolResultBudget(result string, budget ToolResultBudget) string {
+	if result == "" {
+		return result
+	}
+
+	// Estimate tokens (rough: 1 token ≈ 4 chars for English, ≈ 1.5 chars for CJK)
+	estimatedTokens := estimateTokens(result)
+
+	if estimatedTokens <= budget.MaxTokens {
+		return result // within budget
+	}
+
+	// Need to truncate — calculate target character count
+	// Use a conservative ratio: 1 token ≈ 3 chars (mixed content)
+	targetChars := budget.MaxTokens * 3
+	if targetChars > budget.MaxChars {
+		targetChars = budget.MaxChars
+	}
+
+	if len(result) <= targetChars {
+		return result
+	}
+
+	// Truncate at a reasonable boundary (prefer newline)
+	truncated := result[:targetChars]
+
+	// Try to truncate at last newline to avoid cutting mid-line
+	if lastNewline := strings.LastIndex(truncated, "\n"); lastNewline > targetChars/2 {
+		truncated = truncated[:lastNewline]
+	}
+
+	return truncated + budget.Truncation
+}
+
+// estimateTokens provides a rough token estimate for a string.
+// This is a simplified version — for production, use the CJK-aware estimator.
+func estimateTokens(text string) int {
+	// Count CJK characters
+	cjk := 0
+	for _, r := range text {
+		if r >= 0x4E00 && r <= 0x9FFF || // CJK Unified Ideographs
+			r >= 0x3040 && r <= 0x309F || // Hiragana
+			r >= 0x30A0 && r <= 0x30FF || // Katakana
+			r >= 0xAC00 && r <= 0xD7AF { // Hangul Syllables
+			cjk++
+		}
+	}
+
+	other := len(text) - cjk*3 // CJK chars are 3 bytes in UTF-8
+
+	// CJK: ~0.67 tokens per char, Other: ~0.25 tokens per char
+	cjkTokens := float64(cjk) * 0.67
+	otherTokens := float64(other) * 0.25
+
+	return int(cjkTokens + otherTokens + 0.5)
+}
+
 // ─── Tool Implementations ──────────────────────────────────
 
 func executeReadFile(cwd string, args map[string]interface{}) (string, error) {
@@ -284,9 +361,10 @@ func executeReadFile(cwd string, args map[string]interface{}) (string, error) {
 	}
 
 	content := string(data)
-	if len(content) > 100000 {
-		content = content[:100000] + "\n\n... (truncated, file too large)"
-	}
+
+	// Apply tool result budget
+	budget := DefaultToolResultBudget()
+	content = ApplyToolResultBudget(content, budget)
 
 	return content, nil
 }
@@ -481,9 +559,14 @@ func executeGrep(cwd string, args map[string]interface{}) (string, error) {
 	}
 
 	result := string(output)
-	if len(result) > 10000 {
-		result = result[:10000] + "\n... (truncated)"
+	if len(result) == 0 {
+		return "No matches found.", nil
 	}
+
+	// Apply tool result budget
+	budget := DefaultToolResultBudget()
+	result = ApplyToolResultBudget(result, budget)
+
 	return result, nil
 }
 
@@ -516,9 +599,9 @@ func executeBash(cwd string, args map[string]interface{}) (string, error) {
 	output, err := cmd.CombinedOutput()
 	result := string(output)
 
-	if len(result) > 50000 {
-		result = result[:50000] + "\n... (truncated)"
-	}
+	// Apply tool result budget
+	budget := DefaultToolResultBudget()
+	result = ApplyToolResultBudget(result, budget)
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
