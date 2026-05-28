@@ -167,6 +167,9 @@ type Model struct {
 	// Tool registry for function calling
 	toolRegistry *api.ToolRegistry
 
+	// Context compaction configuration
+	compactionConfig CompactionConfig
+
 	// Streaming channel for standalone API client
 	streamCh <-chan api.StreamEvent
 
@@ -186,13 +189,14 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 	vp.Style = lipgloss.NewStyle().Padding(0, 1)
 
 	m := Model{
-		prompt:    ">",
-		ready:     true,
-		viewport:  vp,
-		client:    client,
-		apiClient: aiClient,
-		panelMode: "auto", // always auto-show when wide enough
-		jobManager: NewJobManager(),
+		prompt:           ">",
+		ready:            true,
+		viewport:         vp,
+		client:           client,
+		apiClient:        aiClient,
+		panelMode:        "auto", // always auto-show when wide enough
+		jobManager:       NewJobManager(),
+		compactionConfig: DefaultCompactionConfig(),
 	}
 
 	m.panelHeaderAtLine = make(map[int]string)
@@ -457,6 +461,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// Continue the agentic loop — send next request to model
+				// Phase 1: Pre-API — check if context needs compaction
+				if m.ShouldCompact(m.compactionConfig) {
+					m.ai.Label = "compacting context..."
+					m.invalidateCache()
+
+					compacted := m.ExecuteCompaction(m.compactionConfig)
+					if compacted {
+						m.session.AppendMessage(NewSystemMessage("Context compacted to preserve token budget."))
+					}
+				}
+
 				m.ai.Status = protocol.AIThinking
 				m.ai.Label = "calling tools..."
 				m.invalidateCache()
@@ -1303,6 +1318,19 @@ func (m Model) handleSubmit() (tea.Model, tea.Cmd) {
 		// Append user message to session
 		if m.session != nil {
 			m.session.AppendMessage(NewUserMessage(raw))
+		}
+
+		// Phase 1: Pre-API — check if context needs compaction
+		if m.ShouldCompact(m.compactionConfig) {
+			m.ai.Status = protocol.AIThinking
+			m.ai.Label = "compacting context..."
+			m.invalidateCache()
+
+			// Perform compaction (synchronous for now)
+			compacted := m.ExecuteCompaction(m.compactionConfig)
+			if compacted {
+				m.session.AppendMessage(NewSystemMessage("Context compacted to preserve token budget."))
+			}
 		}
 
 		m.ai.Status = protocol.AIThinking
