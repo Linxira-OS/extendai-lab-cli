@@ -353,10 +353,10 @@ type PermissionRule struct {
 - [x] Streaming (SSE, reasoning content)
 
 ### P1 — 上下文安全
-- [ ] Token 估算改进 (CJK-aware)
-- [ ] 上下文压缩 (shouldCompact + compact)
-- [ ] 工具结果截断 (applyToolResultBudget)
-- [ ] 上下文使用可视化
+- [x] Token 估算改进 (CJK-aware)
+- [x] 上下文压缩 (shouldCompact + compact)
+- [x] 工具结果截断 (applyToolResultBudget)
+- [x] 上下文使用可视化
 
 ### P2 — 工具增强
 - [ ] Tool hooks (beforeToolCall, afterToolCall)
