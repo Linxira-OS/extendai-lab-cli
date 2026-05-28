@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -70,9 +71,10 @@ type MsgAIStatus struct {
 type MsgStreamChunk struct {
 	Content          string
 	ReasoningContent string
+	ToolCalls        []api.ToolCall
 	Done             bool
 	Error            string
-	Usage            *api.UsageInfo // token usage (only in Done)
+	Usage            *api.UsageInfo
 }
 type MsgStatusUpdate struct {
 	Update protocol.StatusUpdate
@@ -162,6 +164,9 @@ type Model struct {
 	// Standalone API client (direct OpenAI-compatible, e.g. LM Studio)
 	apiClient *api.Client
 
+	// Tool registry for function calling
+	toolRegistry *api.ToolRegistry
+
 	// Streaming channel for standalone API client
 	streamCh <-chan api.StreamEvent
 
@@ -210,6 +215,9 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 		m.serverConnected = true
 		m.modelName = aiClient.Model()
 		m.modelURL = aiClient.BaseURL()
+		// Initialize tool registry
+		cwd, _ := os.Getwd()
+		m.toolRegistry = api.NewToolRegistry(cwd)
 	}
 
 	// Initialize session (load most recent or prompt selection)
@@ -421,6 +429,57 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.Done {
+			// Check if model returned tool_calls (agentic loop)
+			if len(msg.ToolCalls) > 0 && m.toolRegistry != nil {
+				// Execute each tool and feed results back to model
+				for _, tc := range msg.ToolCalls {
+					// Parse arguments
+					var args map[string]interface{}
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+						args = make(map[string]interface{})
+					}
+
+					// Execute tool
+					result, err := m.toolRegistry.Execute(tc.Function.Name, args)
+					isError := err != nil
+					if isError {
+						result = err.Error()
+					}
+
+					// Add tool result to API client history
+					m.apiClient.AddToolResult(tc.ID, result, isError)
+
+					// Add tool message to session for display
+					if m.session != nil {
+						toolMsg := NewToolMessage(tc.Function.Name, result)
+						m.session.AppendMessage(toolMsg)
+					}
+				}
+
+				// Continue the agentic loop — send next request to model
+				m.ai.Status = protocol.AIThinking
+				m.ai.Label = "calling tools..."
+				m.invalidateCache()
+
+				var tools []api.ToolDefinition
+				if m.toolRegistry != nil {
+					tools = m.toolRegistry.GetDefinitions()
+				}
+				ch, err := m.apiClient.SendMessage(context.Background(), "", tools)
+				if err != nil {
+					m.ai.Status = protocol.AIError
+					m.ai.ErrorMsg = err.Error()
+					if m.session != nil {
+						m.session.AppendMessage(NewErrorMessage(err.Error()))
+					}
+					m.invalidateCache()
+					return m, nil
+				}
+				m.streamCh = ch
+				return m, m.apiNextChunk()
+			}
+
+			// No tool_calls — normal completion
 			m.ai.Status = protocol.AIIdle
 			// Build final content: reasoning + content
 			finalContent := m.ai.Content
@@ -1254,8 +1313,12 @@ func (m Model) handleSubmit() (tea.Model, tea.Cmd) {
 		m.invalidateCache()
 		m.viewport.GotoBottom()
 
-		// Start the streaming API call immediately (stores the channel on m)
-		ch, err := m.apiClient.SendMessage(context.Background(), raw)
+		// Start the streaming API call with tools
+		var tools []api.ToolDefinition
+		if m.toolRegistry != nil {
+			tools = m.toolRegistry.GetDefinitions()
+		}
+		ch, err := m.apiClient.SendMessage(context.Background(), raw, tools)
 		if err != nil {
 			m.ai.Status = protocol.AIError
 			m.ai.ErrorMsg = err.Error()
@@ -1282,7 +1345,11 @@ func (m Model) handleSubmit() (tea.Model, tea.Cmd) {
 // apiStartStream starts an API call and returns a Cmd that reads the first event.
 func (m Model) apiStartStream(userMsg string) tea.Cmd {
 	return func() tea.Msg {
-		ch, err := m.apiClient.SendMessage(context.Background(), userMsg)
+		var tools []api.ToolDefinition
+		if m.toolRegistry != nil {
+			tools = m.toolRegistry.GetDefinitions()
+		}
+		ch, err := m.apiClient.SendMessage(context.Background(), userMsg, tools)
 		if err != nil {
 			return MsgError{Err: err.Error()}
 		}
@@ -1294,7 +1361,7 @@ func (m Model) apiStartStream(userMsg string) tea.Cmd {
 			return MsgError{Err: evt.Error.Error()}
 		}
 		if evt.Done {
-			return MsgStreamChunk{Done: true}
+			return MsgStreamChunk{Done: true, Usage: evt.Usage, ToolCalls: evt.ToolCalls}
 		}
 		m.streamCh = ch
 		return MsgStreamChunk{Content: evt.Content}
@@ -1313,7 +1380,7 @@ func (m Model) apiNextChunk() tea.Cmd {
 			return MsgError{Err: evt.Error.Error()}
 		}
 		if evt.Done {
-			return MsgStreamChunk{Done: true, Usage: evt.Usage}
+			return MsgStreamChunk{Done: true, Usage: evt.Usage, ToolCalls: evt.ToolCalls}
 		}
 		return MsgStreamChunk{
 			Content:          evt.Content,

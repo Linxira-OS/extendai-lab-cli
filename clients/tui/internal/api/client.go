@@ -29,9 +29,25 @@ import (
 // ─── Types ───────────────────────────────────────────────────
 
 // Message represents a single chat message in the request.
+// Supports text, tool_calls (assistant), and tool_result (user).
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string        `json:"role"`
+	Content    string        `json:"content,omitempty"`
+	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"` // for tool role
+}
+
+// ToolCall represents a tool call from the model.
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"` // "function"
+	Function FunctionCall `json:"function"`
+}
+
+// FunctionCall represents a function call within a tool call.
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // ModelInfo holds discovered capabilities for the active model.
@@ -47,8 +63,9 @@ type ModelInfo struct {
 
 // StreamEvent is yielded on the channel returned by SendMessage.
 type StreamEvent struct {
-	Content          string // regular content delta
-	ReasoningContent string // reasoning/thinking delta (shown dimmer)
+	Content          string     // regular content delta
+	ReasoningContent string     // reasoning/thinking delta (shown dimmer)
+	ToolCalls        []ToolCall // tool calls (only in final chunk)
 	Done             bool
 	Error            error
 	Usage            *UsageInfo // token usage (only in final chunk)
@@ -321,24 +338,30 @@ func (c *Client) GetHistory() []Message {
 
 // SendMessage sends a user message and returns a channel of stream events.
 // The caller reads until Done or Error.
-func (c *Client) SendMessage(ctx context.Context, content string) (<-chan StreamEvent, error) {
+// tools is an optional list of tool definitions to include in the request.
+func (c *Client) SendMessage(ctx context.Context, content string, tools []ToolDefinition) (<-chan StreamEvent, error) {
 	ch := make(chan StreamEvent, 64)
 
 	// Append user message
 	c.history = append(c.history, Message{Role: "user", Content: content})
 
-	// Build request body — use reasoning if model supports it
+	// Build request body
 	body := map[string]interface{}{
 		"model":    c.model,
 		"messages": c.history,
 		"stream":   true,
 	}
 
+	// Include tools if provided
+	if len(tools) > 0 {
+		body["tools"] = tools
+	}
+
 	// If the model supports reasoning, include the reasoning parameter
 	if c.info != nil && c.info.SupportsReasoning {
 		effort := c.ReasoningEffort
 		if effort == "" {
-			effort = "medium" // default effort level
+			effort = "medium"
 		}
 		body["reasoning"] = map[string]string{"effort": effort}
 	}
@@ -389,6 +412,8 @@ func (c *Client) stream(req *http.Request, ch chan<- StreamEvent) {
 	var fullContent strings.Builder
 	var fullReasoning strings.Builder
 	var lastUsage *UsageInfo
+	var toolCalls []ToolCall
+	toolCallMap := make(map[int]*ToolCall) // index → accumulated tool call
 
 streamLoop:
 	for scanner.Scan() {
@@ -405,8 +430,17 @@ streamLoop:
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content          string `json:"content"`
-					ReasoningContent string `json:"reasoning_content"`
+					Content          string     `json:"content"`
+					ReasoningContent string     `json:"reasoning_content"`
+					ToolCalls        []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id,omitempty"`
+						Type     string `json:"type,omitempty"`
+						Function struct {
+							Name      string `json:"name,omitempty"`
+							Arguments string `json:"arguments,omitempty"`
+						} `json:"function"`
+					} `json:"tool_calls,omitempty"`
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
@@ -416,7 +450,7 @@ streamLoop:
 			continue
 		}
 
-		// Capture usage if present (some providers include it in the last chunk)
+		// Capture usage if present
 		if chunk.Usage != nil {
 			lastUsage = chunk.Usage
 		}
@@ -425,7 +459,36 @@ streamLoop:
 			continue
 		}
 
-		// Read both content and reasoning_content
+		// Handle tool_calls accumulation
+		for _, tc := range chunk.Choices[0].Delta.ToolCalls {
+			existing, ok := toolCallMap[tc.Index]
+			if !ok {
+				// New tool call
+				newTC := ToolCall{
+					ID:   tc.ID,
+					Type: tc.Type,
+					Function: FunctionCall{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					},
+				}
+				toolCallMap[tc.Index] = &newTC
+			} else {
+				// Accumulate arguments
+				if tc.ID != "" {
+					existing.ID = tc.ID
+				}
+				if tc.Type != "" {
+					existing.Type = tc.Type
+				}
+				if tc.Function.Name != "" {
+					existing.Function.Name = tc.Function.Name
+				}
+				existing.Function.Arguments += tc.Function.Arguments
+			}
+		}
+
+		// Read content and reasoning
 		delta := chunk.Choices[0].Delta.Content
 		rc := chunk.Choices[0].Delta.ReasoningContent
 
@@ -452,9 +515,20 @@ streamLoop:
 		return
 	}
 
-	// Store assistant response
-	assistantMsg := fullContent.String()
-	c.history = append(c.history, Message{Role: "assistant", Content: assistantMsg})
+	// Collect accumulated tool calls
+	for i := 0; i < len(toolCallMap); i++ {
+		if tc, ok := toolCallMap[i]; ok {
+			toolCalls = append(toolCalls, *tc)
+		}
+	}
+
+	// Store assistant response (with tool calls if present)
+	assistantMsg := Message{
+		Role:      "assistant",
+		Content:   fullContent.String(),
+		ToolCalls: toolCalls,
+	}
+	c.history = append(c.history, assistantMsg)
 
 	// If no usage from API, estimate from content length
 	if lastUsage == nil {
@@ -464,13 +538,28 @@ streamLoop:
 			totalInput += len(m.Content)
 		}
 		lastUsage = &UsageInfo{
-			PromptTokens:     totalInput / 4,  // rough estimate
-			CompletionTokens: totalOutput / 4, // rough estimate
+			PromptTokens:     totalInput / 4,
+			CompletionTokens: totalOutput / 4,
 			TotalTokens:      (totalInput + totalOutput) / 4,
 		}
 	}
 
-	ch <- StreamEvent{Done: true, Usage: lastUsage}
+	ch <- StreamEvent{Done: true, Usage: lastUsage, ToolCalls: toolCalls}
+}
+
+// AddToolResult adds a tool result message to the history.
+// This is used to feed tool execution results back to the model.
+func (c *Client) AddToolResult(toolCallID string, content string, isError bool) {
+	role := "tool"
+	resultContent := content
+	if isError {
+		resultContent = "Error: " + content
+	}
+	c.history = append(c.history, Message{
+		Role:       role,
+		Content:    resultContent,
+		ToolCallID: toolCallID,
+	})
 }
 
 // ─── Deadline reader (prevents blocking on slow servers) ───────
