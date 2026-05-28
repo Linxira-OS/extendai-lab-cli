@@ -114,8 +114,9 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 	}
 
 	type stat struct {
-		color lipgloss.Color
-		chars int
+		color  lipgloss.Color
+		chars  int
+		tokens int // CJK-aware token estimate
 	}
 
 	stats := []stat{
@@ -127,12 +128,15 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 	}
 	roles := []string{RoleSystem, RoleUser, RoleAssistant, RoleTool, RoleError}
 
-	totalChars := 0
+	totalTokens := 0
 	for _, msg := range m.session.GetMessages() {
 		for i, role := range roles {
 			if msg.Role == role {
-				stats[i].chars += utf8.RuneCountInString(msg.Content)
-				totalChars += utf8.RuneCountInString(msg.Content)
+				c := utf8.RuneCountInString(msg.Content)
+				t := EstimateTokens(msg.Content)
+				stats[i].chars += c
+				stats[i].tokens += t
+				totalTokens += t
 				break
 			}
 		}
@@ -143,7 +147,6 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 	if m.apiClient != nil && m.apiClient.Info() != nil && m.apiClient.Info().ContextLength > 0 {
 		maxTokens = m.apiClient.Info().ContextLength
 	}
-	maxChars := maxTokens * 4 // conservative: 1 token ≈ 4 chars
 
 	// Choose format based on available width
 	// Narrow: "███░░ 0.1K/128K" (no spaces around /)
@@ -161,7 +164,7 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 	}
 
 	// If no messages, show empty bar (all gray)
-	if totalChars == 0 {
+	if totalTokens == 0 {
 		bar := lipgloss.NewStyle().
 			Background(theme.Colors.Muted).
 			Render(strings.Repeat(" ", barWidth))
@@ -176,12 +179,12 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 		return text, 0
 	}
 
-	// Build segments: each segment width = chars / maxChars * barWidth
+	// Build segments: each segment width = tokens / maxTokens * barWidth
 	var segments []string
 	usedWidth := 0
 	for _, s := range stats {
 		if s.chars > 0 {
-			segW := int(float64(s.chars) / float64(maxChars) * float64(barWidth))
+			segW := int(float64(s.tokens) / float64(maxTokens) * float64(barWidth))
 			if segW == 0 && s.chars > 0 {
 				segW = 1
 			}
@@ -208,13 +211,12 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 
 	bar := lipgloss.JoinHorizontal(lipgloss.Top, segments...)
 
-	// Format text
-	estimatedTokens := totalChars / 4
-	currentK := formatTokenK(estimatedTokens)
+	// Format text (using CJK-aware token estimate)
+	currentK := formatTokenK(totalTokens)
 	totalK := formatTokenK(maxTokens)
 
 	// Color based on usage percentage
-	pct := float64(estimatedTokens) / float64(maxTokens) * 100
+	pct := float64(totalTokens) / float64(maxTokens) * 100
 	if pct > 100 {
 		pct = 100
 	}
@@ -223,7 +225,7 @@ func (m *Model) buildContextBar(width int) (string, float64) {
 	var text string
 	if isNarrow {
 		text = lipgloss.NewStyle().Foreground(ctxColor).Render(
-			fmt.Sprintf("%s %.1fK/%s", bar, float64(estimatedTokens)/1000, totalK))
+			fmt.Sprintf("%s %.1fK/%s", bar, float64(totalTokens)/1000, totalK))
 	} else {
 		text = lipgloss.NewStyle().Foreground(ctxColor).Render(
 			fmt.Sprintf("%s %s / %s", bar, currentK, totalK))

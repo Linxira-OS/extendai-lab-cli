@@ -23,11 +23,11 @@ type ContextUsage struct {
 
 // RoleStat holds per-role character/token counts.
 type RoleStat struct {
-	Role  string
-	Name  string
-	Color lipgloss.Color
-	Chars int
-	Tokens int // estimated: chars / 4
+	Role   string
+	Name   string
+	Color  lipgloss.Color
+	Chars  int
+	Tokens int // CJK-aware token estimate
 	Pct    float64
 }
 
@@ -45,21 +45,20 @@ func (m *Model) buildContextUsage() ContextUsage {
 		{Role: RoleError, Name: "err", Color: theme.Colors.Error},
 	}
 
-	totalChars := 0
+	totalTokens := 0
 	msgs := m.session.GetMessages()
 	for _, msg := range msgs {
 		for i, s := range stats {
 			if msg.Role == s.Role {
 				c := utf8.RuneCountInString(msg.Content)
+				t := EstimateTokens(msg.Content)
 				stats[i].Chars += c
-				totalChars += c
+				stats[i].Tokens += t
+				totalTokens += t
 				break
 			}
 		}
 	}
-
-	// Conservative token estimation: chars / 4
-	totalTokens := totalChars / 4
 
 	// Get max context from model info
 	maxTokens := 128000 // default
@@ -79,11 +78,10 @@ func (m *Model) buildContextUsage() ContextUsage {
 		status = "high"
 	}
 
-	// Calculate per-role percentages
+	// Calculate per-role percentages (tokens already computed in loop above)
 	for i := range stats {
-		if totalChars > 0 {
-			stats[i].Tokens = stats[i].Chars / 4
-			stats[i].Pct = float64(stats[i].Chars) / float64(totalChars) * 100
+		if totalTokens > 0 {
+			stats[i].Pct = float64(stats[i].Tokens) / float64(totalTokens) * 100
 		}
 	}
 
@@ -165,7 +163,7 @@ func (m *Model) renderContextSidebar(width int) string {
 	// Token detail line
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(
-		fmt.Sprintf("≈%s tokens (chars/4)", formatTokenK(usage.UsedTokens))))
+		fmt.Sprintf("≈%s tokens (CJK-aware)", formatTokenK(usage.UsedTokens))))
 
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -249,7 +247,7 @@ func (m *Model) renderContextInspector(width int) string {
 
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(theme.Colors.TextDim).Render(
-		"Token estimate: chars ÷ 4 (conservative)"))
+		"Token estimate: CJK-aware (CN≈1.5char, EN≈4char)"))
 
 	return strings.TrimRight(b.String(), "\n")
 }
