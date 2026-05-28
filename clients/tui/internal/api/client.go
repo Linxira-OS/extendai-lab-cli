@@ -51,6 +51,14 @@ type StreamEvent struct {
 	ReasoningContent string // reasoning/thinking delta (shown dimmer)
 	Done             bool
 	Error            error
+	Usage            *UsageInfo // token usage (only in final chunk)
+}
+
+// UsageInfo holds token usage from the API response.
+type UsageInfo struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // capReasoning holds LM Studio's reasoning field shape.
@@ -90,6 +98,10 @@ type Client struct {
 	info    *ModelInfo // discovered capabilities
 	history []Message
 	http    *http.Client
+
+	// Thinking intensity (reasoning effort)
+	// "low" | "medium" | "high" | "" (default/off)
+	ReasoningEffort string
 }
 
 // NewFromEnv creates a client from environment variables.
@@ -294,6 +306,17 @@ func (c *Client) Reset() {
 	}
 }
 
+// SetHistory replaces the conversation history with the given messages.
+// Used to sync with session messages on startup.
+func (c *Client) SetHistory(messages []Message) {
+	c.history = messages
+}
+
+// GetHistory returns the current conversation history.
+func (c *Client) GetHistory() []Message {
+	return c.history
+}
+
 // ─── Chat ────────────────────────────────────────────────────
 
 // SendMessage sends a user message and returns a channel of stream events.
@@ -313,7 +336,11 @@ func (c *Client) SendMessage(ctx context.Context, content string) (<-chan Stream
 
 	// If the model supports reasoning, include the reasoning parameter
 	if c.info != nil && c.info.SupportsReasoning {
-		body["reasoning"] = map[string]string{"mode": "on"}
+		effort := c.ReasoningEffort
+		if effort == "" {
+			effort = "medium" // default effort level
+		}
+		body["reasoning"] = map[string]string{"effort": effort}
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -360,6 +387,8 @@ func (c *Client) stream(req *http.Request, ch chan<- StreamEvent) {
 	scanner.Buffer(make([]byte, 0, 65536), 65536)
 
 	var fullContent strings.Builder
+	var fullReasoning strings.Builder
+	var lastUsage *UsageInfo
 
 streamLoop:
 	for scanner.Scan() {
@@ -381,10 +410,17 @@ streamLoop:
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
+			Usage *UsageInfo `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
 		}
+
+		// Capture usage if present (some providers include it in the last chunk)
+		if chunk.Usage != nil {
+			lastUsage = chunk.Usage
+		}
+
 		if len(chunk.Choices) == 0 {
 			continue
 		}
@@ -406,6 +442,7 @@ streamLoop:
 			ch <- StreamEvent{Content: delta}
 		}
 		if rc != "" {
+			fullReasoning.WriteString(rc)
 			ch <- StreamEvent{ReasoningContent: rc}
 		}
 	}
@@ -419,7 +456,21 @@ streamLoop:
 	assistantMsg := fullContent.String()
 	c.history = append(c.history, Message{Role: "assistant", Content: assistantMsg})
 
-	ch <- StreamEvent{Done: true}
+	// If no usage from API, estimate from content length
+	if lastUsage == nil {
+		totalOutput := fullContent.Len() + fullReasoning.Len()
+		totalInput := 0
+		for _, m := range c.history {
+			totalInput += len(m.Content)
+		}
+		lastUsage = &UsageInfo{
+			PromptTokens:     totalInput / 4,  // rough estimate
+			CompletionTokens: totalOutput / 4, // rough estimate
+			TotalTokens:      (totalInput + totalOutput) / 4,
+		}
+	}
+
+	ch <- StreamEvent{Done: true, Usage: lastUsage}
 }
 
 // ─── Deadline reader (prevents blocking on slow servers) ───────

@@ -72,6 +72,7 @@ type MsgStreamChunk struct {
 	ReasoningContent string
 	Done             bool
 	Error            string
+	Usage            *api.UsageInfo // token usage (only in Done)
 }
 type MsgStatusUpdate struct {
 	Update protocol.StatusUpdate
@@ -221,6 +222,10 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 	}
 	if session, files := loadRecentSessionOrPrompt(dir); session != nil {
 		m.session = session
+		// Sync API client history with session messages
+		if aiClient != nil {
+			syncAPIHistory(aiClient, session)
+		}
 	} else if len(files) > 0 {
 		m.sessionPickerOpen = true
 		m.activeDialog = newSessionPickerDialog(files, dir)
@@ -230,6 +235,30 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 	}
 
 	return m
+}
+
+// syncAPIHistory syncs the API client's conversation history with the session's messages.
+func syncAPIHistory(client *api.Client, session *Session) {
+	msgs := session.GetMessages()
+	if len(msgs) == 0 {
+		return
+	}
+
+	// Convert session messages to API messages
+	apiMsgs := []api.Message{
+		{Role: "system", Content: "You are a helpful AI assistant."},
+	}
+	for _, msg := range msgs {
+		role := msg.Role
+		if role == "error" || role == "tool" {
+			continue // skip error and tool messages
+		}
+		apiMsgs = append(apiMsgs, api.Message{
+			Role:    role,
+			Content: msg.Content,
+		})
+	}
+	client.SetHistory(apiMsgs)
 }
 
 func (m Model) Init() tea.Cmd {
@@ -410,7 +439,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.reqFirstToken.IsZero() {
 					ttft = m.reqFirstToken.Sub(m.reqStart)
 				}
-				asm := NewAssistantMessage(finalContent, dur, ttft, 0, m.reqTokensOut, 0)
+
+				// Use API usage if available, otherwise estimate
+				tokensIn := 0
+				tokensOut := m.reqTokensOut
+				if msg.Usage != nil {
+					tokensIn = msg.Usage.PromptTokens
+					tokensOut = msg.Usage.CompletionTokens
+				}
+
+				asm := NewAssistantMessage(finalContent, dur, ttft, tokensIn, tokensOut, 0)
 				if m.session != nil {
 					m.session.AppendMessage(asm)
 					m.session.Save()
@@ -492,6 +530,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessionPickerOpen = false
 			m.dialogOpen = false
 			m.activeDialog = nil
+			// Reset API history for new session
+			if m.apiClient != nil {
+				m.apiClient.Reset()
+			}
 			return m, nil
 		}
 		loaded, err := LoadSession(msg.Path)
@@ -501,6 +543,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.session = NewSession(m.currentDir)
 		} else {
 			m.session = loaded
+			// Sync API history with loaded session
+			if m.apiClient != nil {
+				syncAPIHistory(m.apiClient, loaded)
+			}
 		}
 		m.sessionPickerOpen = false
 		m.dialogOpen = false
@@ -1267,7 +1313,7 @@ func (m Model) apiNextChunk() tea.Cmd {
 			return MsgError{Err: evt.Error.Error()}
 		}
 		if evt.Done {
-			return MsgStreamChunk{Done: true}
+			return MsgStreamChunk{Done: true, Usage: evt.Usage}
 		}
 		return MsgStreamChunk{
 			Content:          evt.Content,
@@ -1294,6 +1340,7 @@ func (m Model) execCommand(cmd string) string {
   /bg <cmd>   Run command in background
   /jobs       List background jobs
   /kill <id>  Cancel a background job
+  /effort     Set thinking intensity: /effort (low|medium|high)
   /exit       Quit
 
 Navigation (browse mode):
@@ -1386,6 +1433,23 @@ Focus:
 			return "Cancelled job: " + args[1]
 		}
 		return "Job not found or not running: " + args[1]
+	case "effort":
+		if m.apiClient == nil {
+			return "No API client configured."
+		}
+		if len(args) < 2 {
+			current := m.apiClient.ReasoningEffort
+			if current == "" {
+				current = "medium (default)"
+			}
+			return "Current thinking effort: " + current + "\nUsage: /effort low|medium|high"
+		}
+		level := strings.ToLower(args[1])
+		if level != "low" && level != "medium" && level != "high" {
+			return "Invalid effort level. Use: low, medium, or high"
+		}
+		m.apiClient.ReasoningEffort = level
+		return "Thinking effort set to: " + level
 	case "exit", "quit", "q":
 		return "Press Ctrl+C to quit."
 	default:

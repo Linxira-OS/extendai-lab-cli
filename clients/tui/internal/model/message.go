@@ -91,9 +91,9 @@ func NewUserMessage(content string) Message {
 // NewAssistantMessage creates an assistant message with timing metadata.
 func NewAssistantMessage(content string, duration, ttft time.Duration, tokensIn, tokensOut, cacheRead int) Message {
 	tps := 0.0
-	activeTime := duration - ttft
-	if activeTime > 0 && tokensOut > 0 {
-		tps = float64(tokensOut) / activeTime.Seconds()
+	// Speed = total output tokens / total duration (not just active time)
+	if duration > 0 && tokensOut > 0 {
+		tps = float64(tokensOut) / duration.Seconds()
 	}
 	return Message{
 		Role:         RoleAssistant,
