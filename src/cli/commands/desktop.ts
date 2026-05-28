@@ -23,6 +23,7 @@ import {
   isPlausibleKey,
   isReasoningEffort,
   loadApiKey,
+  loadBaiduApiKey,
   loadBraveApiKey,
   loadDesktopOpenTabs,
   loadEditMode,
@@ -176,6 +177,7 @@ type InMessage = { tabId?: string } & (
         | "bing-intl"
         | "searxng"
         | "metaso"
+        | "baidu"
         | "tavily"
         | "perplexity"
         | "exa"
@@ -183,6 +185,7 @@ type InMessage = { tabId?: string } & (
         | "ollama";
       webSearchEndpoint?: string | null;
       metasoApiKey?: string | null;
+      baiduApiKey?: string | null;
       tavilyApiKey?: string | null;
       perplexityApiKey?: string | null;
       exaApiKey?: string | null;
@@ -243,6 +246,7 @@ interface SettingsEvent {
     | "bing-intl"
     | "searxng"
     | "metaso"
+    | "baidu"
     | "tavily"
     | "perplexity"
     | "exa"
@@ -251,10 +255,12 @@ interface SettingsEvent {
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
+    baidu?: string;
     tavily?: string;
     perplexity?: string;
     exa?: string;
     ollama?: string;
+    brave?: string;
   };
   subagentModels?: Record<string, "flash" | "pro">;
   contextTokens?: Record<string, number>;
@@ -723,6 +729,7 @@ function maskApiKey(key: string | undefined): string | undefined {
 
 function collectWebSearchApiKeyPrefixes(): {
   metaso?: string;
+  baidu?: string;
   tavily?: string;
   perplexity?: string;
   exa?: string;
@@ -731,6 +738,7 @@ function collectWebSearchApiKeyPrefixes(): {
 } {
   return {
     metaso: maskApiKey(loadMetasoApiKey()),
+    baidu: maskApiKey(loadBaiduApiKey()),
     tavily: maskApiKey(loadTavilyApiKey()),
     perplexity: maskApiKey(loadPerplexityApiKey()),
     exa: maskApiKey(loadExaApiKey()),
@@ -2797,6 +2805,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           msg.webSearchEngine !== undefined ||
           msg.webSearchEndpoint !== undefined ||
           msg.metasoApiKey !== undefined ||
+          msg.baiduApiKey !== undefined ||
           msg.tavilyApiKey !== undefined ||
           msg.perplexityApiKey !== undefined ||
           msg.exaApiKey !== undefined ||
@@ -2810,6 +2819,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           if (msg.metasoApiKey !== undefined) {
             cfg.metasoApiKey = msg.metasoApiKey?.trim() || undefined;
+          }
+          if (msg.baiduApiKey !== undefined) {
+            cfg.baiduApiKey = msg.baiduApiKey?.trim() || undefined;
           }
           if (msg.tavilyApiKey !== undefined) {
             cfg.tavilyApiKey = msg.tavilyApiKey?.trim() || undefined;
