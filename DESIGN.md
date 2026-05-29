@@ -359,22 +359,22 @@ type PermissionRule struct {
 - [x] 上下文使用可视化
 
 ### P2 — 工具增强
-- [ ] Tool hooks (beforeToolCall, afterToolCall)
-- [ ] 并发控制 (只读并行, 写入串行)
-- [ ] 异步后台任务集成到 agentic loop
-- [ ] 命令拦截/修正
+- [x] Tool hooks (beforeToolCall, afterToolCall)
+- [x] 并发控制 (只读并行, 写入串行)
+- [x] 异步后台任务集成到 agentic loop
+- [x] 命令拦截/修正
 
 ### P3 — 高级功能
-- [ ] 子 agent (spawn_subagent)
-- [ ] 记忆系统 (remember/forget/recall)
-- [ ] 技能系统 (run_skill/install_skill)
-- [ ] 计划系统 (submit_plan/mark_step_complete)
+- [x] 记忆系统 (remember/forget/recall)
+- [ ] 子 agent (spawn_subagent) - 未来实现
+- [ ] 技能系统 (run_skill/install_skill) - 未来实现
+- [ ] 计划系统 (submit_plan/mark_step_complete) - 未来实现
 
 ### P4 — UI 增强
-- [ ] 工具卡片美化 (╭│╰ rail)
-- [ ] 水波动画
-- [ ] Header 状态芯片
-- [ ] 上下文用量进度条
+- [x] 工具卡片美化 (╭│╰ rail) - 已实现
+- [x] 水波动画
+- [ ] Header 状态芯片 - 未来实现
+- [x] 上下文用量进度条 - 已实现
 
 ---
 
