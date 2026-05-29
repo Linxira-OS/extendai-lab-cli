@@ -32,7 +32,7 @@ import (
 // Supports text, tool_calls (assistant), and tool_result (user).
 type Message struct {
 	Role       string        `json:"role"`
-	Content    string        `json:"content,omitempty"`
+	Content    string        `json:"content"` // Always include content (required by most APIs)
 	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"` // for tool role
 }
@@ -342,6 +342,11 @@ func (c *Client) GetHistory() []Message {
 func (c *Client) SendMessage(ctx context.Context, content string, tools []ToolDefinition) (<-chan StreamEvent, error) {
 	ch := make(chan StreamEvent, 64)
 
+	// Ensure content is never empty
+	if content == "" {
+		content = "(no content)"
+	}
+
 	// Append user message
 	c.history = append(c.history, Message{Role: "user", Content: content})
 
@@ -554,6 +559,10 @@ func (c *Client) AddToolResult(toolCallID string, content string, isError bool) 
 	resultContent := content
 	if isError {
 		resultContent = "Error: " + content
+	}
+	// Ensure content is never empty (some APIs require non-empty content)
+	if resultContent == "" {
+		resultContent = "(empty result)"
 	}
 	c.history = append(c.history, Message{
 		Role:       role,

@@ -1877,11 +1877,19 @@ func (m *Model) renderMainContent(width int) string {
 			}
 
 			switch msg.Role {
-			case RoleUser:
-				// ┃ User message (left border accent, matching opencode)
-				borderChar := lipgloss.NewStyle().Foreground(theme.Colors.Primary).Render("┃")
+		case RoleUser:
+			// ┃ User message (left border accent, matching opencode)
+			borderChar := lipgloss.NewStyle().Foreground(theme.Colors.Primary).Render("┃")
+			// Wrap long user messages
+			mdWidth := width - 3
+			if mdWidth < 20 {
+				mdWidth = 20
+			}
+			wrappedContent := wrapText(msg.Content, mdWidth)
+			for _, line := range strings.Split(wrappedContent, "\n") {
 				contentLines = append(contentLines,
-					borderChar+"  "+lipgloss.NewStyle().Foreground(theme.Colors.TextUser).Bold(true).Render(msg.Content))
+					borderChar+"  "+lipgloss.NewStyle().Foreground(theme.Colors.TextUser).Bold(true).Render(line))
+			}
 
 			case RoleAssistant:
 				// Assistant text (3-char indent, matching opencode)
@@ -2863,3 +2871,85 @@ func newSessionPickerDialog(files []string, cwd string) Dialog {
 // ─── Interface guards ────────────────────────────────────────
 
 var _ tea.Model = (*Model)(nil)
+
+// ─── Text Wrapping Helper ─────────────────────────────────────
+
+// wrapText wraps text to fit within the given width.
+// Handles word boundaries and preserves existing newlines.
+func wrapText(text string, width int) string {
+	if width < 1 {
+		return text
+	}
+
+	lines := strings.Split(text, "\n")
+	var result []string
+
+	for _, line := range lines {
+		if lipgloss.Width(line) <= width {
+			result = append(result, line)
+			continue
+		}
+
+		// Wrap long lines
+		wrapped := wrapLine(line, width)
+		result = append(result, wrapped...)
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// wrapLine wraps a single line to fit within the given width.
+func wrapLine(line string, width int) []string {
+	if width < 1 {
+		return []string{line}
+	}
+
+	var result []string
+	remaining := line
+
+	for lipgloss.Width(remaining) > width {
+		// Find a good break point
+		cut := findBreakPointSimple(remaining, width)
+		if cut <= 0 {
+			cut = width
+		}
+
+		// Extract the line
+		part := remaining[:cut]
+		result = append(result, strings.TrimRight(part, " "))
+		remaining = strings.TrimLeft(remaining[cut:], " ")
+	}
+
+	if remaining != "" {
+		result = append(result, remaining)
+	}
+
+	return result
+}
+
+// findBreakPointSimple finds a good point to break a line, preferring word boundaries.
+func findBreakPointSimple(s string, width int) int {
+	visibleWidth := 0
+	lastSpace := -1
+
+	i := 0
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+
+		if r == ' ' {
+			lastSpace = i
+		}
+
+		visibleWidth++
+		if visibleWidth > width {
+			if lastSpace > 0 {
+				return lastSpace
+			}
+			return i
+		}
+
+		i += size
+	}
+
+	return len(s)
+}

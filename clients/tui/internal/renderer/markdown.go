@@ -212,7 +212,9 @@ func wrapLines(lines []string, width int) string {
 			out = append(out, "")
 			continue
 		}
-		if utf8.RuneCountInString(line) <= width {
+		// Use lipgloss.Width to correctly handle ANSI escape codes
+		lineWidth := lipgloss.Width(line)
+		if lineWidth <= width {
 			out = append(out, line)
 			continue
 		}
@@ -225,22 +227,79 @@ func hardWrap(s string, width int) []string {
 	if width < 1 {
 		return []string{s}
 	}
+
+	// For strings with ANSI codes, we need to be more careful
+	// First, try to wrap at word boundaries
 	var out []string
-	for utf8.RuneCountInString(s) > width {
-		cut := runeIndexAtWidth(s, width)
-		// Try to break at a space for cleaner wrapping (UTF-8 safe).
-		// Walk backwards from cut by runes to find the last space.
-		spaceCut := lastSpaceBefore(s, cut)
-		if spaceCut > 0 {
-			cut = spaceCut
+	remaining := s
+
+	for lipgloss.Width(remaining) > width {
+		// Find a good break point
+		cut := findBreakPoint(remaining, width)
+		if cut <= 0 {
+			// Can't find a good break point, force break
+			cut = width
 		}
-		out = append(out, strings.TrimRight(s[:cut], " "))
-		s = strings.TrimLeft(s[cut:], " ")
+
+		// Extract the line
+		line := remaining[:cut]
+		out = append(out, strings.TrimRight(line, " "))
+		remaining = strings.TrimLeft(remaining[cut:], " ")
 	}
-	if s != "" {
-		out = append(out, s)
+
+	if remaining != "" {
+		out = append(out, remaining)
 	}
+
 	return out
+}
+
+// findBreakPoint finds a good point to break a line, preferring word boundaries.
+func findBreakPoint(s string, width int) int {
+	// Walk through the string, tracking visible width
+	visibleWidth := 0
+	lastSpace := -1
+	lastSpaceWidth := 0
+
+	i := 0
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+
+		// Check for ANSI escape sequence
+		if r == '\033' {
+			// Skip the entire escape sequence
+			end := i + 1
+			for end < len(s) && s[end] != 'm' {
+				end++
+			}
+			if end < len(s) {
+				end++ // Include the 'm'
+			}
+			i = end
+			continue
+		}
+
+		// Track visible width
+		if r == ' ' {
+			lastSpace = i
+			lastSpaceWidth = visibleWidth
+		}
+
+		visibleWidth++
+		if visibleWidth > width {
+			// We've exceeded the width
+			if lastSpace > 0 && lastSpaceWidth > width/2 {
+				// Break at the last space if it's past halfway
+				return lastSpace
+			}
+			// Otherwise break at current position
+			return i
+		}
+
+		i += size
+	}
+
+	return len(s)
 }
 
 // runeIndexAtWidth returns the byte offset into s after width runes.
