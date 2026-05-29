@@ -222,6 +222,8 @@ func New(client *ipc.Client, aiClient *api.Client) Model {
 		// Initialize tool registry
 		cwd, _ := os.Getwd()
 		m.toolRegistry = api.NewToolRegistry(cwd)
+		// Set job manager for background task support
+		m.toolRegistry.SetJobManager(m.jobManager)
 	}
 
 	// Initialize session (load most recent or prompt selection)

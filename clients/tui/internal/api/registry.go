@@ -53,9 +53,12 @@ type RegisteredTool struct {
 
 // ToolRegistry manages all available tools.
 type ToolRegistry struct {
-	tools map[string]*RegisteredTool
-	cwd   string
-	hooks *ToolHooks
+	tools      map[string]*RegisteredTool
+	cwd        string
+	hooks      *ToolHooks
+	jobManager interface {
+		StartJob(command, description string) (string, error)
+	}
 }
 
 // NewToolRegistry creates a new tool registry with all built-in tools.
@@ -66,6 +69,13 @@ func NewToolRegistry(cwd string) *ToolRegistry {
 	}
 	r.registerBuiltinTools()
 	return r
+}
+
+// SetJobManager sets the job manager for background task execution.
+func (r *ToolRegistry) SetJobManager(jm interface {
+	StartJob(command, description string) (string, error)
+}) {
+	r.jobManager = jm
 }
 
 // SetHooks sets the before/after hooks for tool execution.
@@ -330,6 +340,52 @@ func (r *ToolRegistry) registerBuiltinTools() {
 			},
 		},
 		Execute:     executeBash,
+		ReadOnly:    false,
+		Concurrency: "exclusive",
+	}
+
+	// bash_bg (background shell execution)
+	// Uses closure to access jobManager
+	r.tools["bash_bg"] = &RegisteredTool{
+		Definition: ToolDefinition{
+			Type: "function",
+			Function: ToolFunction{
+				Name:        "bash_bg",
+				Description: "Execute a shell command in the background. Returns a job ID. Use /jobs to check status.",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"command": map[string]interface{}{
+							"type":        "string",
+							"description": "The shell command to execute in background",
+						},
+						"description": map[string]interface{}{
+							"type":        "string",
+							"description": "Description of what the command does",
+						},
+					},
+					"required": []string{"command"},
+				},
+			},
+		},
+		Execute: func(cwd string, args map[string]interface{}) (string, error) {
+			command, _ := args["command"].(string)
+			if command == "" {
+				return "", fmt.Errorf("command is required")
+			}
+			description, _ := args["description"].(string)
+
+			if r.jobManager == nil {
+				return "", fmt.Errorf("job manager not set")
+			}
+
+			jobID, err := r.jobManager.StartJob(command, description)
+			if err != nil {
+				return "", fmt.Errorf("starting background job: %w", err)
+			}
+
+			return fmt.Sprintf("Started background job %s: %s", jobID, command), nil
+		},
 		ReadOnly:    false,
 		Concurrency: "exclusive",
 	}
@@ -684,4 +740,10 @@ func executeBash(cwd string, args map[string]interface{}) (string, error) {
 	}
 
 	return result, nil
+}
+
+// executeBashBg is a placeholder - the actual implementation uses the job manager.
+// This function is registered but will be overridden by the closure in registerBuiltinTools.
+func executeBashBg(cwd string, args map[string]interface{}) (string, error) {
+	return "", fmt.Errorf("bash_bg requires job manager to be set")
 }
