@@ -1,7 +1,9 @@
 package model
 
 import (
+	"fmt"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestFormatTokenK(t *testing.T) {
@@ -129,4 +131,62 @@ func containsSubstr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestFooterWorkingLabel(t *testing.T) {
+	tests := []struct {
+		frame int
+		want  string
+	}{
+		{0, "⠋"},
+		{1, "⠙"},
+		{9, "⠏"},
+		{10, "⠋"}, // wraps around
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("frame_%d", tt.frame), func(t *testing.T) {
+			got := footerWorkingLabel(tt.frame)
+			if got != tt.want {
+				t.Errorf("footerWorkingLabel(%d) = %q, want %q", tt.frame, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWaterSpoutAnimation(t *testing.T) {
+	tests := []struct {
+		name   string
+		t      int
+		width  int
+		wantLen int
+	}{
+		{"small", 0, 4, 4},
+		{"medium", 0, 8, 8},
+		{"large", 0, 20, 20},
+		{"zero width", 0, 0, 0},
+		{"negative width", 0, -1, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := waterSpoutAnimation(tt.t, tt.width)
+			runeCount := utf8.RuneCountInString(got)
+			if runeCount != tt.wantLen {
+				t.Errorf("waterSpoutAnimation(%d, %d) rune count = %d, want %d", tt.t, tt.width, runeCount, tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestWaterSpoutAnimationChanges(t *testing.T) {
+	// Animation should change over time
+	frame0 := waterSpoutAnimation(0, 10)
+	frame1 := waterSpoutAnimation(1, 10)
+	frame2 := waterSpoutAnimation(2, 10)
+
+	// At least some frames should be different
+	if frame0 == frame1 && frame1 == frame2 {
+		t.Error("water-spout animation should change over time")
+	}
 }

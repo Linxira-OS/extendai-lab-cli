@@ -2,7 +2,9 @@ package model
 
 import (
 	"fmt"
+	"math"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Linxira-OS/extendai-lab-cli/clients/tui/internal/protocol"
@@ -281,6 +283,13 @@ func renderFooterFromProps(width int, p FooterProps) string {
 			fmt.Sprintf("%s %s", p.SpinnerFrame, label))
 		// Append spinner after context bar, with padding
 		center = center + "  " + spinnerText
+
+		// Add water-spout animation (CodeWhale-style)
+		// Use a small wave (8 chars) to show activity
+		frame := int(time.Now().UnixMilli() / 100)
+		wave := waterSpoutAnimation(frame, 8)
+		waveText := lipgloss.NewStyle().Foreground(p.WorkingColor).Render(wave)
+		center = center + " " + waveText
 	}
 
 	// ── Layout: left | center | right ──
@@ -306,6 +315,34 @@ func renderFooterFromProps(width int, p FooterProps) string {
 func footerWorkingLabel(frame int) string {
 	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	return frames[frame%len(frames)]
+}
+
+// waterSpoutAnimation returns a water-spout wave animation string.
+// Uses sine wave formula: primary = sin(x*0.52 - t*8.0)
+// Characters: ▁▂▃▄▅▆▇█▅▃▂▁
+func waterSpoutAnimation(t int, width int) string {
+	if width < 4 {
+		return ""
+	}
+
+	chars := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█', '▇', '▆', '▅', '▄', '▃', '▂'}
+
+	var result []rune
+	for x := 0; x < width; x++ {
+		// Sine wave formula
+		val := math.Sin(float64(x)*0.52 - float64(t)*0.8)
+		// Map to 0-1 range
+		idx := int((val + 1) / 2 * float64(len(chars)-1))
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(chars) {
+			idx = len(chars) - 1
+		}
+		result = append(result, chars[idx])
+	}
+
+	return string(result)
 }
 
 // ─── Footer toast (status messages) ─────────────────────────
