@@ -590,9 +590,11 @@ func executeBash(cwd string, args map[string]interface{}) (string, error) {
 	cmd := exec.Command(shell, "-c", command)
 	cmd.Dir = cwd
 
-	// Set timeout
+	// Set timeout with safe kill (process might have already exited)
 	timer := time.AfterFunc(time.Duration(timeout)*time.Second, func() {
-		cmd.Process.Kill()
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
 	})
 	defer timer.Stop()
 
