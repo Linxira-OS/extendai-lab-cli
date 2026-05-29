@@ -24,6 +24,20 @@ type ToolFunction struct {
 	Parameters  interface{} `json:"parameters"`
 }
 
+// ─── Tool Hooks (from pi) ─────────────────────────────────────
+
+// ToolHookFunc is the function signature for tool hooks.
+// beforeToolCall: return (block=true, reason) to prevent execution.
+// afterToolCall: return (overrideResult, overrideErr) to override result.
+type BeforeToolCallFunc func(toolName string, args map[string]interface{}) (block bool, reason string)
+type AfterToolCallFunc func(toolName string, result string, err error) (overrideResult string, overrideErr error)
+
+// ToolHooks holds before/after hooks for tool execution.
+type ToolHooks struct {
+	BeforeToolCall BeforeToolCallFunc
+	AfterToolCall  AfterToolCallFunc
+}
+
 // ─── Tool Registry ──────────────────────────────────────────
 
 // ToolFunc is the function signature for tool execution.
@@ -33,12 +47,15 @@ type ToolFunc func(cwd string, args map[string]interface{}) (string, error)
 type RegisteredTool struct {
 	Definition ToolDefinition
 	Execute    ToolFunc
+	ReadOnly   bool   // true for read-only tools (can run in parallel)
+	Concurrency string // "shared" (parallel) or "exclusive" (serial)
 }
 
 // ToolRegistry manages all available tools.
 type ToolRegistry struct {
 	tools map[string]*RegisteredTool
 	cwd   string
+	hooks *ToolHooks
 }
 
 // NewToolRegistry creates a new tool registry with all built-in tools.
@@ -49,6 +66,11 @@ func NewToolRegistry(cwd string) *ToolRegistry {
 	}
 	r.registerBuiltinTools()
 	return r
+}
+
+// SetHooks sets the before/after hooks for tool execution.
+func (r *ToolRegistry) SetHooks(hooks *ToolHooks) {
+	r.hooks = hooks
 }
 
 // GetTool returns a tool by name.
@@ -66,17 +88,60 @@ func (r *ToolRegistry) GetDefinitions() []ToolDefinition {
 }
 
 // Execute executes a tool by name with the given arguments.
+// Runs beforeToolCall hook before execution and afterToolCall hook after.
 func (r *ToolRegistry) Execute(name string, args map[string]interface{}) (string, error) {
 	tool, ok := r.tools[name]
 	if !ok {
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
-	return tool.Execute(r.cwd, args)
+
+	// Run beforeToolCall hook
+	if r.hooks != nil && r.hooks.BeforeToolCall != nil {
+		block, reason := r.hooks.BeforeToolCall(name, args)
+		if block {
+			return "", fmt.Errorf("tool execution blocked: %s", reason)
+		}
+	}
+
+	// Execute the tool
+	result, err := tool.Execute(r.cwd, args)
+
+	// Run afterToolCall hook
+	if r.hooks != nil && r.hooks.AfterToolCall != nil {
+		overrideResult, overrideErr := r.hooks.AfterToolCall(name, result, err)
+		if overrideResult != "" || overrideErr != nil {
+			return overrideResult, overrideErr
+		}
+	}
+
+	return result, err
 }
 
 // SetCwd updates the working directory for all tools.
 func (r *ToolRegistry) SetCwd(cwd string) {
 	r.cwd = cwd
+}
+
+// GetReadOnlyTools returns names of tools that can run in parallel.
+func (r *ToolRegistry) GetReadOnlyTools() []string {
+	var names []string
+	for name, tool := range r.tools {
+		if tool.ReadOnly {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// GetExclusiveTools returns names of tools that must run serially.
+func (r *ToolRegistry) GetExclusiveTools() []string {
+	var names []string
+	for name, tool := range r.tools {
+		if !tool.ReadOnly {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // ─── Built-in Tools ────────────────────────────────────────
@@ -101,7 +166,8 @@ func (r *ToolRegistry) registerBuiltinTools() {
 				},
 			},
 		},
-		Execute: executeReadFile,
+		Execute:  executeReadFile,
+		ReadOnly: true,
 	}
 
 	// write_file
@@ -178,7 +244,8 @@ func (r *ToolRegistry) registerBuiltinTools() {
 				},
 			},
 		},
-		Execute: executeListDir,
+		Execute:  executeListDir,
+		ReadOnly: true,
 	}
 
 	// search_files (glob)
@@ -204,7 +271,8 @@ func (r *ToolRegistry) registerBuiltinTools() {
 				},
 			},
 		},
-		Execute: executeSearchFiles,
+		Execute:  executeSearchFiles,
+		ReadOnly: true,
 	}
 
 	// grep (content search)
@@ -234,7 +302,8 @@ func (r *ToolRegistry) registerBuiltinTools() {
 				},
 			},
 		},
-		Execute: executeGrep,
+		Execute:  executeGrep,
+		ReadOnly: true,
 	}
 
 	// bash (shell execution)
@@ -260,7 +329,9 @@ func (r *ToolRegistry) registerBuiltinTools() {
 				},
 			},
 		},
-		Execute: executeBash,
+		Execute:     executeBash,
+		ReadOnly:    false,
+		Concurrency: "exclusive",
 	}
 }
 

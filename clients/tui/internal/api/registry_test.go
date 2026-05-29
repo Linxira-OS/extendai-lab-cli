@@ -575,3 +575,148 @@ func TestToolRegistrySetCwd(t *testing.T) {
 		t.Errorf("Execute(read_file) = %q, want %q", result, "Other")
 	}
 }
+
+// ─── Tool Hooks Tests ─────────────────────────────────────────
+
+func TestToolRegistryHooks(t *testing.T) {
+	dir := tmpDir(t)
+	writeFile(t, dir, "test.txt", "Hello")
+
+	registry := NewToolRegistry(dir)
+
+	// Test beforeToolCall hook that blocks execution
+	blockCalled := false
+	registry.SetHooks(&ToolHooks{
+		BeforeToolCall: func(toolName string, args map[string]interface{}) (bool, string) {
+			blockCalled = true
+			if toolName == "read_file" {
+				return true, "reading files is not allowed"
+			}
+			return false, ""
+		},
+	})
+
+	// Should be blocked
+	_, err := registry.Execute("read_file", map[string]interface{}{"path": "test.txt"})
+	if err == nil {
+		t.Error("Execute() should fail when beforeToolCall blocks")
+	}
+	if !blockCalled {
+		t.Error("beforeToolCall hook should have been called")
+	}
+
+	// Other tools should work
+	registry.SetHooks(&ToolHooks{
+		BeforeToolCall: func(toolName string, args map[string]interface{}) (bool, string) {
+			if toolName == "read_file" {
+				return true, "blocked"
+			}
+			return false, ""
+		},
+	})
+
+	result, err := registry.Execute("list_dir", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Execute(list_dir) error = %v", err)
+	}
+	if result == "" {
+		t.Error("Execute(list_dir) should return result")
+	}
+}
+
+func TestToolRegistryAfterHook(t *testing.T) {
+	dir := tmpDir(t)
+	writeFile(t, dir, "test.txt", "Hello")
+
+	registry := NewToolRegistry(dir)
+
+	// Test afterToolCall hook that overrides result
+	overrideCalled := false
+	registry.SetHooks(&ToolHooks{
+		AfterToolCall: func(toolName string, result string, err error) (string, error) {
+			overrideCalled = true
+			if toolName == "read_file" {
+				return "overridden content", nil
+			}
+			return "", nil
+		},
+	})
+
+	result, err := registry.Execute("read_file", map[string]interface{}{"path": "test.txt"})
+	if err != nil {
+		t.Fatalf("Execute(read_file) error = %v", err)
+	}
+	if !overrideCalled {
+		t.Error("afterToolCall hook should have been called")
+	}
+	if result != "overridden content" {
+		t.Errorf("Execute(read_file) = %q, want %q", result, "overridden content")
+	}
+}
+
+func TestToolRegistryNoHooks(t *testing.T) {
+	dir := tmpDir(t)
+	writeFile(t, dir, "test.txt", "Hello")
+
+	registry := NewToolRegistry(dir)
+	// Don't set any hooks
+
+	result, err := registry.Execute("read_file", map[string]interface{}{"path": "test.txt"})
+	if err != nil {
+		t.Fatalf("Execute(read_file) error = %v", err)
+	}
+	if result != "Hello" {
+		t.Errorf("Execute(read_file) = %q, want %q", result, "Hello")
+	}
+}
+
+// ─── ReadOnly/Concurrency Tests ───────────────────────────────
+
+func TestToolRegistryReadOnlyTools(t *testing.T) {
+	dir := tmpDir(t)
+	registry := NewToolRegistry(dir)
+
+	readOnly := registry.GetReadOnlyTools()
+	if len(readOnly) == 0 {
+		t.Error("GetReadOnlyTools() should return at least one tool")
+	}
+
+	// Check that expected tools are read-only
+	readOnlyMap := make(map[string]bool)
+	for _, name := range readOnly {
+		readOnlyMap[name] = true
+	}
+
+	expectedReadOnly := []string{"read_file", "list_dir", "search_files", "grep"}
+	for _, name := range expectedReadOnly {
+		if !readOnlyMap[name] {
+			t.Errorf("tool %q should be read-only", name)
+		}
+	}
+}
+
+func TestToolRegistryExclusiveTools(t *testing.T) {
+	dir := tmpDir(t)
+	registry := NewToolRegistry(dir)
+
+	exclusive := registry.GetExclusiveTools()
+	if len(exclusive) == 0 {
+		t.Error("GetExclusiveTools() should return at least one tool")
+	}
+
+	// bash should be exclusive
+	exclusiveMap := make(map[string]bool)
+	for _, name := range exclusive {
+		exclusiveMap[name] = true
+	}
+
+	if !exclusiveMap["bash"] {
+		t.Error("bash tool should be exclusive")
+	}
+	if !exclusiveMap["write_file"] {
+		t.Error("write_file tool should be exclusive")
+	}
+	if !exclusiveMap["edit_file"] {
+		t.Error("edit_file tool should be exclusive")
+	}
+}
