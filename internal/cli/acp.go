@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/acp"
 	"reasonix/internal/agent"
+	"reasonix/internal/boot"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
@@ -84,7 +85,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	if !ok {
 		return nil, fmt.Errorf("unknown model %q", f.model)
 	}
-	execProv, err := newProvider(entry)
+	execProv, err := boot.NewProvider(entry)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +113,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	// session/new, all connected for the session's lifetime.
 	cleanup := func() {}
 	var host *plugin.Host
-	specs := append(pluginSpecs(cfg.Plugins), p.MCPServers...)
+	specs := append(boot.PluginSpecs(cfg.Plugins), p.MCPServers...)
 	if len(specs) > 0 {
 		h, ptools, err := plugin.StartAll(ctx, specs)
 		if err != nil {
@@ -150,7 +151,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 			cleanup()
 			return nil, fmt.Errorf("planner_model %q is not a configured provider", pm)
 		}
-		plannerProv, err := newProvider(pe)
+		plannerProv, err := boot.NewProvider(pe)
 		if err != nil {
 			cleanup()
 			return nil, fmt.Errorf("planner %q: %w", pm, err)
