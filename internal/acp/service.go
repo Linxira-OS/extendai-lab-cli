@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sync"
 
 	"reasonix/internal/agent"
@@ -64,6 +65,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 	}
 	conn.Handle("initialize", svc.initialize)
 	conn.Handle("session/new", svc.sessionNew)
+	conn.Handle("session/load", svc.sessionLoad)
 	conn.Handle("session/prompt", svc.sessionPrompt)
 	conn.HandleNotify("session/cancel", svc.sessionCancel)
 	defer svc.closeAll()
@@ -108,14 +110,15 @@ func (s *acpSession) abort() {
 	}
 }
 
-// initialize advertises the agent's fixed capability set. The flags match main
-// exactly: no loadSession, embedded resource text but no image/audio prompts,
-// and stdio-only MCP (no http/sse).
+// initialize advertises the agent's capability set: sessions can be resumed via
+// session/load (transcripts are keyed by session id under the session dir),
+// prompts carry inline resource text (embeddedContext) but not image/audio, and
+// MCP is stdio-only (no http/sse) — the latter three matching main.
 func (s *service) initialize(_ context.Context, _ json.RawMessage) (any, error) {
 	return InitializeResult{
 		ProtocolVersion: ProtocolVersion,
 		AgentCapabilities: AgentCapabilities{
-			LoadSession: false,
+			LoadSession: true,
 			PromptCapabilities: PromptCapabilities{
 				Image:           false,
 				Audio:           false,
@@ -158,10 +161,11 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	sink.bindApprove(ctrl.Approve)
 
 	sess := &acpSession{id: id, ctrl: ctrl}
-	// Pin a transcript file when the controller has a session dir, so every turn
-	// auto-saves there and session/prompt can hand the path back to the client.
+	// Pin a transcript file keyed by session id when the controller has a session
+	// dir, so every turn auto-saves there, session/prompt can hand the path back,
+	// and session/load can find it again by id across process restarts.
 	if dir := ctrl.SessionDir(); dir != "" {
-		sess.transcript = agent.NewSessionPath(dir, ctrl.Label())
+		sess.transcript = transcriptPath(dir, id)
 		ctrl.SetSessionPath(sess.transcript)
 	}
 
@@ -170,6 +174,66 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	s.mu.Unlock()
 
 	return SessionNewResult{SessionID: id}, nil
+}
+
+// sessionLoad resumes a previously-saved session by id: it builds a controller
+// (rooted at the requested cwd), seeds it from the on-disk transcript, replays
+// the conversation to the client as session/update notifications, and registers
+// it for subsequent prompts. A session already live in this process is replayed
+// from memory without rebuilding.
+func (s *service) sessionLoad(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p SessionLoadParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/load: " + err.Error()}
+	}
+	if p.SessionID == "" {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/load: missing sessionId"}
+	}
+
+	if sess := s.session(p.SessionID); sess != nil {
+		newUpdateSink(s.conn, p.SessionID).replay(sess.ctrl.History())
+		return SessionLoadResult{}, nil
+	}
+
+	sink := newUpdateSink(s.conn, p.SessionID)
+	ctrl, err := s.factory.NewSession(ctx, SessionParams{
+		Cwd:        p.Cwd,
+		MCPServers: mcpSpecs(p.MCPServers),
+		Sink:       sink,
+	})
+	if err != nil {
+		return nil, &RPCError{Code: ErrInternal, Message: "session/load: " + err.Error()}
+	}
+	ctrl.EnableInteractiveApproval()
+	sink.bindApprove(ctrl.Approve)
+
+	dir := ctrl.SessionDir()
+	if dir == "" {
+		ctrl.Close()
+		return nil, &RPCError{Code: ErrInternal, Message: "session/load: persistence is disabled"}
+	}
+	path := transcriptPath(dir, p.SessionID)
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		ctrl.Close()
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/load: unknown session " + p.SessionID}
+	}
+	ctrl.Resume(loaded, path)
+
+	sess := &acpSession{id: p.SessionID, ctrl: ctrl, transcript: path}
+	s.mu.Lock()
+	s.sessions[p.SessionID] = sess
+	s.mu.Unlock()
+
+	sink.replay(ctrl.History())
+	return SessionLoadResult{}, nil
+}
+
+// transcriptPath is where a session's transcript lives — keyed by id so
+// session/load can recover it. Distinct from the cli's timestamp-labelled
+// chat/run session files (those are addressed by a picker, not by id).
+func transcriptPath(dir, id string) string {
+	return filepath.Join(dir, id+".jsonl")
 }
 
 // sessionPrompt runs one turn. It flattens the prompt blocks to text and runs the

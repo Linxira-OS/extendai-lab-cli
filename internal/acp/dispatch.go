@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 // notifier is the slice of Conn the dispatch sink depends on: it pushes
@@ -114,6 +115,45 @@ func (s *updateSink) Emit(e event.Event) {
 
 func (s *updateSink) send(update any) {
 	_ = s.conn.Notify("session/update", SessionUpdateParams{SessionID: s.sessionID, Update: update})
+}
+
+// replay streams a loaded conversation back to the client as session/update
+// notifications so a resumed session reconstructs its transcript view. The
+// system message is skipped (not user-visible); everything is reported as already
+// completed since it is history, not a live turn.
+func (s *updateSink) replay(msgs []provider.Message) {
+	for _, m := range msgs {
+		switch m.Role {
+		case provider.RoleUser:
+			if m.Content != "" {
+				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(m.Content)})
+			}
+		case provider.RoleAssistant:
+			if m.ReasoningContent != "" {
+				s.send(messageChunk{SessionUpdate: "agent_thought_chunk", Content: textBlock(m.ReasoningContent)})
+			}
+			if m.Content != "" {
+				s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(m.Content)})
+			}
+			for _, tc := range m.ToolCalls {
+				s.send(toolCall{
+					SessionUpdate: "tool_call",
+					ToolCallID:    tc.ID,
+					Title:         tc.Name,
+					Kind:          toolKindFor(tc.Name),
+					Status:        "completed",
+					RawInput:      rawJSON(tc.Arguments),
+				})
+			}
+		case provider.RoleTool:
+			s.send(toolCallUpdateMsg{
+				SessionUpdate: "tool_call_update",
+				ToolCallID:    m.ToolCallID,
+				Status:        "completed",
+				Content:       []toolContent{{Type: "content", Content: textBlock(clip(m.Content))}},
+			})
+		}
+	}
 }
 
 // requestPermission forwards an approval request to the client as a

@@ -100,6 +100,22 @@ type SessionNewResult struct {
 	SessionID string `json:"sessionId"`
 }
 
+// --- session/load ---
+
+// SessionLoadParams resumes a session saved under sessionId (the id a prior
+// session/new returned), optionally re-rooting it at cwd with fresh MCP servers.
+// The agent replays the stored conversation as session/update notifications
+// before the request returns.
+type SessionLoadParams struct {
+	SessionID  string          `json:"sessionId"`
+	Cwd        string          `json:"cwd,omitempty"`
+	MCPServers []MCPServerSpec `json:"mcpServers,omitempty"`
+}
+
+// SessionLoadResult is the empty ack; the conversation has already arrived as a
+// burst of session/update notifications by the time it is sent.
+type SessionLoadResult struct{}
+
 // --- content blocks (inbound prompt) ---
 
 // ContentBlock is one piece of a prompt. The agent reads text blocks and the

@@ -207,6 +207,78 @@ func TestE2EToolTurnAndPersistence(t *testing.T) {
 	}
 }
 
+// TestE2ESessionLoad runs a turn in one server (saving a transcript keyed by
+// session id), then resumes it in a fresh server pointed at the same session dir
+// — simulating a restart — and checks the conversation is replayed to the client
+// as session/update notifications.
+func TestE2ESessionLoad(t *testing.T) {
+	dir := t.TempDir()
+	mkFactory := func() *e2eFactory {
+		return &e2eFactory{
+			prov: &scriptedProvider{name: "fake", responses: [][]provider.Chunk{
+				{
+					{Type: provider.ChunkText, Text: "Reading the file."},
+					toolCallChunk("c1", "peek", `{"path":"x"}`),
+					{Type: provider.ChunkDone},
+				},
+				{{Type: provider.ChunkText, Text: "All done."}, {Type: provider.ChunkDone}},
+			}},
+			tool:       fakeTool{name: "peek", ro: true, out: "file contents here"},
+			policy:     permission.New("ask", nil, nil, nil),
+			sessionDir: dir,
+		}
+	}
+
+	// Run 1: create a session and run a turn, persisting the transcript.
+	client1, stop1 := startServer(t, mkFactory())
+	sid := openSession(t, client1)
+	promptCh := client1.callAsync("session/prompt", SessionPromptParams{
+		SessionID: sid,
+		Prompt:    []ContentBlock{{Type: "text", Text: "look at x"}},
+	})
+	drainPrompt(t, client1, promptCh)
+	stop1()
+
+	// Run 2: a brand-new server (same session dir) resumes by id.
+	client2, stop2 := startServer(t, mkFactory())
+	defer stop2()
+	loadCh := client2.callAsync("session/load", SessionLoadParams{SessionID: sid})
+	notifs, resp := drainPrompt(t, client2, loadCh)
+
+	if resp.Error != nil {
+		t.Fatalf("session/load errored: %+v", resp.Error)
+	}
+
+	// The replay reconstructs the conversation: the user turn, the tool call and
+	// its result, and the assistant's answers.
+	kinds := map[string]int{}
+	texts := map[string]string{}
+	for _, n := range notifs {
+		k := updateKind(t, n)
+		kinds[k]++
+		var p struct {
+			Update struct {
+				Content struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"update"`
+		}
+		json.Unmarshal(n.Params, &p)
+		if p.Update.Content.Text != "" {
+			texts[k] += p.Update.Content.Text
+		}
+	}
+	if kinds["user_message_chunk"] != 1 || !strings.Contains(texts["user_message_chunk"], "look at x") {
+		t.Errorf("user replay = %dx %q, want the original prompt", kinds["user_message_chunk"], texts["user_message_chunk"])
+	}
+	if !strings.Contains(texts["agent_message_chunk"], "All done.") {
+		t.Errorf("assistant replay = %q, want it to include the answer", texts["agent_message_chunk"])
+	}
+	if kinds["tool_call"] != 1 || kinds["tool_call_update"] != 1 {
+		t.Errorf("tool replay = %v, want 1 tool_call + 1 tool_call_update", kinds)
+	}
+}
+
 // TestE2EApprovalRoundTrip drives a write tool through the gate: the policy asks,
 // the controller raises an ApprovalRequest, the sink forwards it as
 // session/request_permission, the client allows it, and the tool then runs.
