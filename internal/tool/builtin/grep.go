@@ -18,7 +18,9 @@ const grepMaxMatches = 200
 
 func init() { tool.RegisterBuiltin(grepTool{}) }
 
-type grepTool struct{}
+// grepTool searches files by regex. workDir, when non-empty, is the directory a
+// relative path resolves against (see resolveIn).
+type grepTool struct{ workDir string }
 
 func (grepTool) Name() string { return "grep" }
 
@@ -32,7 +34,7 @@ func (grepTool) Schema() json.RawMessage {
 
 func (grepTool) ReadOnly() bool { return true }
 
-func (grepTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (g grepTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
@@ -46,6 +48,7 @@ func (grepTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 	if p.Path == "" {
 		p.Path = "."
 	}
+	p.Path = resolveIn(g.workDir, p.Path)
 	re, err := regexp.Compile(p.Pattern)
 	if err != nil {
 		return "", fmt.Errorf("invalid pattern: %w", err)

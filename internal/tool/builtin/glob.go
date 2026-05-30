@@ -12,7 +12,9 @@ import (
 
 func init() { tool.RegisterBuiltin(globTool{}) }
 
-type globTool struct{}
+// globTool matches files by pattern. workDir, when non-empty, is the directory
+// a relative pattern resolves against (see resolveIn).
+type globTool struct{ workDir string }
 
 func (globTool) Name() string { return "glob" }
 
@@ -26,7 +28,7 @@ func (globTool) Schema() json.RawMessage {
 
 func (globTool) ReadOnly() bool { return true }
 
-func (globTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Pattern string `json:"pattern"`
 	}
@@ -36,6 +38,7 @@ func (globTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 	if p.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")
 	}
+	p.Pattern = resolveIn(g.workDir, p.Pattern)
 
 	matches, err := filepath.Glob(p.Pattern)
 	if err != nil {

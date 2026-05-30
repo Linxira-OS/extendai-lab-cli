@@ -12,7 +12,9 @@ import (
 
 func init() { tool.RegisterBuiltin(listDir{}) }
 
-type listDir struct{}
+// listDir lists a directory. workDir, when non-empty, is the directory a
+// relative path resolves against (see resolveIn).
+type listDir struct{ workDir string }
 
 func (listDir) Name() string { return "ls" }
 
@@ -26,7 +28,7 @@ func (listDir) Schema() json.RawMessage {
 
 func (listDir) ReadOnly() bool { return true }
 
-func (listDir) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	p := struct {
 		Path string `json:"path"`
 	}{Path: "."}
@@ -38,6 +40,7 @@ func (listDir) Execute(ctx context.Context, args json.RawMessage) (string, error
 	if p.Path == "" {
 		p.Path = "."
 	}
+	p.Path = resolveIn(l.workDir, p.Path)
 
 	entries, err := os.ReadDir(p.Path)
 	if err != nil {

@@ -13,8 +13,12 @@ import (
 func init() { tool.RegisterBuiltin(editFile{}) }
 
 // editFile replaces an exact string in a file. roots confines the target to the
-// workspace when non-empty (see writeFile).
-type editFile struct{ roots []string }
+// workspace when non-empty (see writeFile); workDir, when non-empty, is the
+// directory a relative path resolves against (see resolveIn).
+type editFile struct {
+	roots   []string
+	workDir string
+}
 
 func (editFile) Name() string { return "edit_file" }
 
@@ -43,6 +47,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if p.OldString == "" {
 		return "", fmt.Errorf("old_string is required")
 	}
+	p.Path = resolveIn(e.workDir, p.Path)
 	if err := confine(e.roots, p.Path); err != nil {
 		return "", err
 	}

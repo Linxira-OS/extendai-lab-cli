@@ -17,7 +17,10 @@ import (
 
 func init() { tool.RegisterBuiltin(readFile{}) }
 
-type readFile struct{}
+// readFile reads a text file. workDir, when non-empty, is the directory a
+// relative path is resolved against (see resolveIn); the zero value registered
+// at init resolves against the process working directory.
+type readFile struct{ workDir string }
 
 const (
 	readFileDefaultLimit = 2000     // lines returned when limit is unset
@@ -44,7 +47,7 @@ func (readFile) Schema() json.RawMessage {
 
 func (readFile) ReadOnly() bool { return true }
 
-func (readFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Path   string `json:"path"`
 		Offset int    `json:"offset,omitempty"`
@@ -56,6 +59,7 @@ func (readFile) Execute(ctx context.Context, args json.RawMessage) (string, erro
 	if p.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	p.Path = resolveIn(r.workDir, p.Path)
 	if p.Offset < 0 {
 		p.Offset = 0
 	}

@@ -18,8 +18,12 @@ func init() { tool.RegisterBuiltin(bash{}) }
 
 // bash runs a shell command with a timeout to avoid hangs. sb, when it enforces,
 // wraps the command in an OS sandbox; the zero value registered at init runs
-// unconfined and is overridden per run by ConfineBash.
-type bash struct{ sb sandbox.Spec }
+// unconfined and is overridden per run by ConfineBash. workDir, when non-empty,
+// is the directory the command runs in (cmd.Dir); empty uses the process cwd.
+type bash struct {
+	sb      sandbox.Spec
+	workDir string
+}
 
 func (bash) Name() string { return "bash" }
 
@@ -53,6 +57,7 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	// Wrap in the OS sandbox when configured; otherwise argv is just bash -c.
 	argv, _ := sandbox.Command(b.sb, "bash", p.Command)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = b.workDir // "" lets exec use the process working directory
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
