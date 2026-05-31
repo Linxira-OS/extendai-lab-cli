@@ -151,7 +151,7 @@ export function Composer({
       return;
     }
 
-    if (mode && !composing) {
+    if (menuMode && !composing) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setActive((i) => (i + 1) % count);
