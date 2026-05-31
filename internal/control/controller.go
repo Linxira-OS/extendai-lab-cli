@@ -20,8 +20,10 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/billing"
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
+	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/jobs"
@@ -68,6 +70,16 @@ type Controller struct {
 	// available on the next turn (see AddMCPServer / RemoveMCPServer).
 	reg       *tool.Registry
 	pluginCtx context.Context
+
+	// Checkpoints (snapshot-based rewind). cp is the per-session store rebound when
+	// the session path changes; cpRoot is the workspace root used to guard restore
+	// writes; cpMsgLen[turn] records len(Session.Messages) at that turn's start, the
+	// truncation boundary for a conversation rewind (live-session only — not
+	// persisted, so a resumed session can rewind code but not conversation for
+	// pre-resume turns).
+	cp       *checkpoint.Store
+	cpRoot   string
+	cpMsgLen []int
 
 	// promptMu serialises approval prompts so at most one is outstanding at a
 	// time (parallel read-only tool calls don't normally gate, writers run
@@ -143,6 +155,9 @@ type Options struct {
 	// context; both are needed for hot-adding MCP servers via AddMCPServer.
 	Registry  *tool.Registry
 	PluginCtx context.Context
+	// WorkspaceRoot is the project root checkpoint restores are confined to ("" =
+	// no confinement). Frontends pass the cwd they launched the session in.
+	WorkspaceRoot string
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard.
@@ -155,7 +170,7 @@ func New(opts Options) *Controller {
 	if pluginCtx == nil {
 		pluginCtx = context.Background()
 	}
-	return &Controller{
+	c := &Controller{
 		runner:       opts.Runner,
 		executor:     opts.Executor,
 		sink:         sink,
@@ -175,10 +190,54 @@ func New(opts Options) *Controller {
 		jobs:         opts.Jobs,
 		reg:          opts.Registry,
 		pluginCtx:    pluginCtx,
+		cpRoot:       opts.WorkspaceRoot,
 		approvals:    map[string]chan approvalReply{},
 		asks:         map[string]chan []event.AskAnswer{},
 		granted:      map[string]bool{},
 	}
+	// Checkpoints: bind a store to the session and route writer pre-edits into it.
+	c.rebindCheckpoints(opts.SessionPath)
+	if c.executor != nil {
+		c.executor.SetPreEditHook(func(ch diff.Change) {
+			if c.cp != nil {
+				c.cp.Snapshot(ch)
+			}
+		})
+	}
+	return c
+}
+
+// ckptDir derives a session's checkpoint directory from its file path
+// (…/<id>.jsonl → …/<id>.ckpt). Empty path → empty (in-memory checkpoints).
+func ckptDir(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return strings.TrimSuffix(sessionPath, ".jsonl") + ".ckpt"
+}
+
+// rebindCheckpoints points the store at the (possibly new) session, loading any
+// checkpoints already on disk, and resets the turn boundaries. Called on
+// construction and whenever the session path changes (NewSession/Resume/SetSessionPath).
+func (c *Controller) rebindCheckpoints(sessionPath string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cp = checkpoint.New(ckptDir(sessionPath), c.cpRoot)
+	c.cpMsgLen = nil
+}
+
+// beginCheckpoint opens a checkpoint for the turn about to run, recording the
+// current message count as the conversation-rewind boundary. Called at the top of
+// runTurn, before the user message is appended.
+func (c *Controller) beginCheckpoint(input string) {
+	if c.cp == nil || c.executor == nil {
+		return
+	}
+	c.mu.Lock()
+	turn := len(c.cpMsgLen)
+	c.cpMsgLen = append(c.cpMsgLen, len(c.executor.Session().Messages))
+	c.mu.Unlock()
+	c.cp.Begin(turn, input)
 }
 
 // --- commands (frontend → controller) ---
@@ -234,6 +293,9 @@ const planApprovedMessage = "Plan approved — plan mode is off; you're cleared 
 // next turn can revise. Plan mode is only ever set interactively, so the headless
 // `Run` path (which doesn't call this) never blocks on a prompt.
 func (c *Controller) runTurn(ctx context.Context, input string) error {
+	// Open a checkpoint for this turn before the user message is appended, so the
+	// recorded message boundary precedes it and pre-edit snapshots land here.
+	c.beginCheckpoint(input)
 	// UserPromptSubmit / Stop hooks bracket the whole turn (incl. the plan
 	// research + approved-execution sub-turns below): a gating UserPromptSubmit
 	// aborts before any model call; Stop fires once when the turn returns.
@@ -523,6 +585,71 @@ func (c *Controller) NewSession() error {
 		c.mu.Unlock()
 	}
 	c.executor.SetSession(agent.NewSession(c.systemPrompt))
+	c.rebindCheckpoints(c.SessionPath())
+	return nil
+}
+
+// RewindScope selects what a Rewind restores.
+type RewindScope int
+
+const (
+	RewindCode         RewindScope = iota // files only
+	RewindConversation                    // message log only
+	RewindBoth                            // both
+)
+
+// Checkpoints lists the session's rewind points (one per user turn), oldest first.
+func (c *Controller) Checkpoints() []checkpoint.Meta {
+	if c.cp == nil {
+		return nil
+	}
+	return c.cp.List()
+}
+
+// Rewind restores the session to the start of `turn`: Code reverts every file that
+// turn (or a later one) changed to its pre-turn content; Conversation truncates the
+// message log back to that turn; Both does both. Refused while a turn is running.
+// Conversation rewind relies on the live boundary recorded at turn start, so it is
+// unavailable for turns inherited from a resumed session (code rewind still works).
+// Frontends re-render their transcript from History after the call.
+func (c *Controller) Rewind(turn int, scope RewindScope) error {
+	if c.cp == nil || c.executor == nil {
+		return fmt.Errorf("checkpoints unavailable")
+	}
+	c.mu.Lock()
+	running := c.running
+	boundary := -1
+	if turn >= 0 && turn < len(c.cpMsgLen) {
+		boundary = c.cpMsgLen[turn]
+	}
+	c.mu.Unlock()
+	if running {
+		return fmt.Errorf("cannot rewind while a turn is running")
+	}
+
+	if scope == RewindCode || scope == RewindBoth {
+		written, deleted, err := c.cp.RestoreCode(turn)
+		if err != nil {
+			return fmt.Errorf("rewind code: %w", err)
+		}
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+			Text: fmt.Sprintf("rewound code to turn %d — %d file(s) restored, %d removed", turn, len(written), len(deleted))})
+	}
+	if scope == RewindConversation || scope == RewindBoth {
+		if boundary < 0 {
+			return fmt.Errorf("conversation rewind unavailable for turn %d (resumed session)", turn)
+		}
+		s := c.executor.Session()
+		if boundary <= len(s.Messages) {
+			s.Messages = s.Messages[:boundary]
+			c.mu.Lock()
+			c.cpMsgLen = c.cpMsgLen[:turn] // later turns are gone
+			c.mu.Unlock()
+			_ = c.Snapshot()
+		}
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+			Text: fmt.Sprintf("rewound conversation to turn %d", turn)})
+	}
 	return nil
 }
 
@@ -535,6 +662,7 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.mu.Lock()
 	c.sessionPath = path
 	c.mu.Unlock()
+	c.rebindCheckpoints(path)
 }
 
 // Snapshot writes the executor's conversation to the active session file. No-op
@@ -561,6 +689,7 @@ func (c *Controller) SetSessionPath(p string) {
 	c.mu.Lock()
 	c.sessionPath = p
 	c.mu.Unlock()
+	c.rebindCheckpoints(p)
 }
 
 // SessionDir reports the directory new session files land in ("" disables

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
@@ -137,6 +138,13 @@ type Agent struct {
 	// headless runs (no interactive user). Set via SetAsker.
 	asker Asker
 
+	// onPreEdit, when non-nil, is called with a writer tool's previewed change
+	// just before it runs — the seam the checkpoint store uses to snapshot a
+	// file's pre-edit content. Only fires for non-ReadOnly tools that implement
+	// tool.Previewer (so bash, whose targets are unknowable, is never tracked).
+	// Set via SetPreEditHook.
+	onPreEdit func(diff.Change)
+
 	// jobs, when non-nil, is the session's background-job manager. executeOne
 	// stamps it onto each tool call's context so the background tools (bash
 	// run_in_background, task run_in_background, bash_output/kill_shell/wait) can
@@ -166,6 +174,10 @@ func (a *Agent) SetGate(g Gate) { a.gate = g }
 // SetAsker installs the asker the `ask` tool uses to question the user.
 // Interactive frontends wire one in; headless runs leave it nil.
 func (a *Agent) SetAsker(as Asker) { a.asker = as }
+
+// SetPreEditHook installs the pre-edit snapshot hook (see onPreEdit). The
+// controller wires it to its per-session checkpoint store; nil disables capture.
+func (a *Agent) SetPreEditHook(fn func(diff.Change)) { a.onPreEdit = fn }
 
 // Session returns the agent's current conversation, useful for persistence
 // hooks that need to read the message log between turns.
@@ -491,6 +503,17 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 				output:  "blocked: " + msg,
 				blocked: true,
 				errMsg:  "blocked by PreToolUse hook",
+			}
+		}
+	}
+	// Checkpoint the file this writer is about to change, so the turn can be
+	// rewound. Fires after all gating (the edit is cleared to run) and only for
+	// tools that can describe their change; a Preview error means the edit will
+	// likely fail anyway, so we skip rather than snapshot a stale state.
+	if a.onPreEdit != nil && !t.ReadOnly() {
+		if pv, ok := t.(tool.Previewer); ok {
+			if change, perr := pv.Preview(json.RawMessage(call.Arguments)); perr == nil {
+				a.onPreEdit(change)
 			}
 		}
 	}
