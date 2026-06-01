@@ -168,7 +168,7 @@ func (r *ToolRegistry) GetParallelSafeTools() []string {
 
 // ─── Parallel Dispatch (from DeepSeek-Reasonix) ───────────────
 
-// ToolCall represents a tool call to execute.
+// ToolCallRequest represents a tool call to execute.
 type ToolCallRequest struct {
 	ID        string
 	Name      string
@@ -184,15 +184,34 @@ type ToolCallResult struct {
 	IsError bool
 }
 
+// DispatchConfig holds configuration for tool dispatch.
+type DispatchConfig struct {
+	MaxParallel     int    // max parallel tool calls (default 3, max 16)
+	MaxResultTokens int    // max tokens per tool result (default 4000)
+	TruncationMsg   string // message to append when truncating
+}
+
+// DefaultDispatchConfig returns sensible defaults.
+func DefaultDispatchConfig() DispatchConfig {
+	return DispatchConfig{
+		MaxParallel:     3,
+		MaxResultTokens: 4000,
+		TruncationMsg:   "\n\n... (truncated to fit context budget)",
+	}
+}
+
 // ParallelDispatch executes tool calls with parallel dispatch.
 // Consecutive parallelSafe calls are grouped and raced via goroutines.
 // The first non-parallel-safe call ends the chunk.
-func (r *ToolRegistry) ParallelDispatch(calls []ToolCallRequest, maxParallel int) []ToolCallResult {
-	if maxParallel <= 0 {
-		maxParallel = 3
+func (r *ToolRegistry) ParallelDispatch(calls []ToolCallRequest, config DispatchConfig) []ToolCallResult {
+	if config.MaxParallel <= 0 {
+		config.MaxParallel = 3
 	}
-	if maxParallel > 16 {
-		maxParallel = 16
+	if config.MaxParallel > 16 {
+		config.MaxParallel = 16
+	}
+	if config.MaxResultTokens <= 0 {
+		config.MaxResultTokens = 4000
 	}
 
 	results := make([]ToolCallResult, len(calls))
@@ -201,7 +220,7 @@ func (r *ToolRegistry) ParallelDispatch(calls []ToolCallRequest, maxParallel int
 	for callIdx < len(calls) {
 		// Collect consecutive parallel-safe calls into a chunk
 		chunk := []int{} // indices into calls
-		for callIdx < len(calls) && len(chunk) < maxParallel {
+		for callIdx < len(calls) && len(chunk) < config.MaxParallel {
 			tool := r.GetTool(calls[callIdx].Name)
 			if tool != nil && tool.ParallelSafe {
 				chunk = append(chunk, callIdx)
@@ -214,7 +233,7 @@ func (r *ToolRegistry) ParallelDispatch(calls []ToolCallRequest, maxParallel int
 
 		// If chunk is empty, execute the current call serially
 		if len(chunk) == 0 {
-			result := r.executeSingle(calls[callIdx])
+			result := r.executeSingle(calls[callIdx], config)
 			results[callIdx] = result
 			callIdx++
 			continue
@@ -229,7 +248,7 @@ func (r *ToolRegistry) ParallelDispatch(calls []ToolCallRequest, maxParallel int
 		resultCh := make(chan indexedResult, len(chunk))
 		for _, idx := range chunk {
 			go func(i int) {
-				result := r.executeSingle(calls[i])
+				result := r.executeSingle(calls[i], config)
 				resultCh <- indexedResult{index: i, result: result}
 			}(idx)
 		}
@@ -245,12 +264,19 @@ func (r *ToolRegistry) ParallelDispatch(calls []ToolCallRequest, maxParallel int
 }
 
 // executeSingle executes a single tool call and returns the result.
-func (r *ToolRegistry) executeSingle(call ToolCallRequest) ToolCallResult {
+// Applies result capping based on config.
+func (r *ToolRegistry) executeSingle(call ToolCallRequest, config DispatchConfig) ToolCallResult {
 	result, err := r.Execute(call.Name, call.Arguments)
 	isError := err != nil
 	if isError {
 		result = err.Error()
 	}
+
+	// Apply result capping
+	if !isError {
+		result = capToolResult(result, config.MaxResultTokens, config.TruncationMsg)
+	}
+
 	return ToolCallResult{
 		ID:      call.ID,
 		Name:    call.Name,
@@ -258,6 +284,45 @@ func (r *ToolRegistry) executeSingle(call ToolCallRequest) ToolCallResult {
 		Error:   err,
 		IsError: isError,
 	}
+}
+
+// capToolResult truncates a tool result to fit within the token budget.
+func capToolResult(result string, maxTokens int, truncationMsg string) string {
+	if maxTokens <= 0 {
+		return result
+	}
+
+	// Estimate tokens
+	estimatedTokens := estimateTokensInContext(result)
+
+	if estimatedTokens <= maxTokens {
+		return result // within budget
+	}
+
+	// Need to truncate — calculate target character count
+	// Use a conservative ratio: 1 token ≈ 3 chars (mixed content)
+	targetChars := maxTokens * 3
+	if targetChars > 16000 {
+		targetChars = 16000
+	}
+
+	if len(result) <= targetChars {
+		return result
+	}
+
+	// Truncate at a reasonable boundary (prefer newline)
+	truncated := result[:targetChars]
+
+	// Try to truncate at last newline to avoid cutting mid-line
+	if lastNewline := strings.LastIndex(truncated, "\n"); lastNewline > targetChars/2 {
+		truncated = truncated[:lastNewline]
+	}
+
+	if truncationMsg == "" {
+		truncationMsg = "\n\n... (truncated)"
+	}
+
+	return truncated + truncationMsg
 }
 
 // ─── Built-in Tools ────────────────────────────────────────

@@ -762,7 +762,8 @@ func TestParallelDispatch(t *testing.T) {
 		{ID: "call2", Name: "read_file", Arguments: map[string]interface{}{"path": "file2.txt"}},
 	}
 
-	results := registry.ParallelDispatch(calls, 2)
+	config := DefaultDispatchConfig()
+	results := registry.ParallelDispatch(calls, config)
 
 	if len(results) != 2 {
 		t.Fatalf("len(results) = %d, want 2", len(results))
@@ -790,7 +791,8 @@ func TestParallelDispatchMixed(t *testing.T) {
 		{ID: "call3", Name: "read_file", Arguments: map[string]interface{}{"path": "file1.txt"}},
 	}
 
-	results := registry.ParallelDispatch(calls, 3)
+	config := DefaultDispatchConfig()
+	results := registry.ParallelDispatch(calls, config)
 
 	if len(results) != 3 {
 		t.Fatalf("len(results) = %d, want 3", len(results))
@@ -804,5 +806,37 @@ func TestParallelDispatchMixed(t *testing.T) {
 	// Second call should succeed (bash)
 	if results[1].IsError {
 		t.Errorf("results[1].Error = %v", results[1].Error)
+	}
+}
+
+func TestCapToolResult(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		maxTokens   int
+		wantTrunc   bool
+	}{
+		{"short", "hello", 100, false},
+		{"exact", "hello", 2, false},
+		{"needs truncation", strings.Repeat("A", 50000), 100, true},
+		{"zero max", "hello", 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := capToolResult(tt.input, tt.maxTokens, "...(truncated)")
+			if tt.wantTrunc {
+				if len(result) >= len(tt.input) {
+					t.Errorf("capToolResult() should truncate, got len=%d, want < %d", len(result), len(tt.input))
+				}
+				if !strings.Contains(result, "truncated") {
+					t.Error("capToolResult() should contain truncation marker")
+				}
+			} else {
+				if result != tt.input {
+					t.Errorf("capToolResult() = %q, want %q", result, tt.input)
+				}
+			}
+		})
 	}
 }
