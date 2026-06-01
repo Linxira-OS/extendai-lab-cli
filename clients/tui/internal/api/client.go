@@ -116,6 +116,9 @@ type Client struct {
 	history []Message
 	http    *http.Client
 
+	// Three-region context model (from DeepSeek-Reasonix)
+	context *CacheFirstContext
+
 	// Thinking intensity (reasoning effort)
 	// "low" | "medium" | "high" | "" (default/off)
 	ReasoningEffort string
@@ -321,17 +324,50 @@ func (c *Client) Reset() {
 	c.history = []Message{
 		{Role: "system", Content: "You are a helpful AI assistant."},
 	}
+	// Reset context if initialized
+	if c.context != nil {
+		c.context = NewCacheFirstContext("You are a helpful AI assistant.", nil)
+	}
 }
 
 // SetHistory replaces the conversation history with the given messages.
 // Used to sync with session messages on startup.
 func (c *Client) SetHistory(messages []Message) {
 	c.history = messages
+	// Sync context if initialized
+	if c.context != nil {
+		c.context = NewCacheFirstContext("", nil)
+		for _, msg := range messages {
+			if msg.Role == "system" {
+				c.context.GetPrefix().ReplaceSystemPrompt(msg.Content)
+			} else {
+				c.context.AppendMessage(msg)
+			}
+		}
+	}
 }
 
 // GetHistory returns the current conversation history.
 func (c *Client) GetHistory() []Message {
 	return c.history
+}
+
+// GetContext returns the cache-first context (nil if not initialized).
+func (c *Client) GetContext() *CacheFirstContext {
+	return c.context
+}
+
+// InitContext initializes the cache-first context with the given system prompt and tools.
+func (c *Client) InitContext(systemPrompt string, tools []ToolDefinition) {
+	c.context = NewCacheFirstContext(systemPrompt, tools)
+}
+
+// GetContextStats returns statistics about the context.
+func (c *Client) GetContextStats() ContextStats {
+	if c.context == nil {
+		return ContextStats{}
+	}
+	return c.context.GetContextStats()
 }
 
 // ─── Chat ────────────────────────────────────────────────────
