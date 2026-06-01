@@ -437,27 +437,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Done {
 			// Check if model returned tool_calls (agentic loop)
 			if len(msg.ToolCalls) > 0 && m.toolRegistry != nil {
-				// Execute each tool and feed results back to model
-				for _, tc := range msg.ToolCalls {
-					// Parse arguments
+				// Convert to ToolCallRequest for parallel dispatch
+				calls := make([]api.ToolCallRequest, len(msg.ToolCalls))
+				for i, tc := range msg.ToolCalls {
 					var args map[string]interface{}
 					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 						args = make(map[string]interface{})
 					}
-
-					// Execute tool
-					result, err := m.toolRegistry.Execute(tc.Function.Name, args)
-					isError := err != nil
-					if isError {
-						result = err.Error()
+					calls[i] = api.ToolCallRequest{
+						ID:        tc.ID,
+						Name:      tc.Function.Name,
+						Arguments: args,
 					}
+				}
 
+				// Execute tools with parallel dispatch
+				config := api.DefaultDispatchConfig()
+				results := m.toolRegistry.ParallelDispatch(calls, config)
+
+				// Process results
+				for _, result := range results {
 					// Add tool result to API client history
-					m.apiClient.AddToolResult(tc.ID, result, isError)
+					m.apiClient.AddToolResult(result.ID, result.Result, result.IsError)
 
 					// Add tool message to session for display
 					if m.session != nil {
-						toolMsg := NewToolMessage(tc.Function.Name, result)
+						toolMsg := NewToolMessage(result.Name, result.Result)
 						m.session.AppendMessage(toolMsg)
 					}
 				}
