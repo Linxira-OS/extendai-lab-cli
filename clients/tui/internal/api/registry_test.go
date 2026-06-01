@@ -720,3 +720,89 @@ func TestToolRegistryExclusiveTools(t *testing.T) {
 		t.Error("edit_file tool should be exclusive")
 	}
 }
+
+func TestToolRegistryParallelSafeTools(t *testing.T) {
+	dir := tmpDir(t)
+	registry := NewToolRegistry(dir)
+
+	parallelSafe := registry.GetParallelSafeTools()
+	if len(parallelSafe) == 0 {
+		t.Error("GetParallelSafeTools() should return at least one tool")
+	}
+
+	// Check that expected tools are parallel-safe
+	parallelSafeMap := make(map[string]bool)
+	for _, name := range parallelSafe {
+		parallelSafeMap[name] = true
+	}
+
+	expectedParallelSafe := []string{"read_file", "list_dir", "search_files", "grep"}
+	for _, name := range expectedParallelSafe {
+		if !parallelSafeMap[name] {
+			t.Errorf("tool %q should be parallel-safe", name)
+		}
+	}
+
+	// bash should NOT be parallel-safe
+	if parallelSafeMap["bash"] {
+		t.Error("bash tool should NOT be parallel-safe")
+	}
+}
+
+func TestParallelDispatch(t *testing.T) {
+	dir := tmpDir(t)
+	writeFile(t, dir, "file1.txt", "content1")
+	writeFile(t, dir, "file2.txt", "content2")
+
+	registry := NewToolRegistry(dir)
+
+	// Create multiple parallel-safe tool calls
+	calls := []ToolCallRequest{
+		{ID: "call1", Name: "read_file", Arguments: map[string]interface{}{"path": "file1.txt"}},
+		{ID: "call2", Name: "read_file", Arguments: map[string]interface{}{"path": "file2.txt"}},
+	}
+
+	results := registry.ParallelDispatch(calls, 2)
+
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want 2", len(results))
+	}
+
+	if results[0].Result != "content1" {
+		t.Errorf("results[0].Result = %q, want %q", results[0].Result, "content1")
+	}
+
+	if results[1].Result != "content2" {
+		t.Errorf("results[1].Result = %q, want %q", results[1].Result, "content2")
+	}
+}
+
+func TestParallelDispatchMixed(t *testing.T) {
+	dir := tmpDir(t)
+	writeFile(t, dir, "file1.txt", "content1")
+
+	registry := NewToolRegistry(dir)
+
+	// Mix parallel-safe and non-parallel-safe calls
+	calls := []ToolCallRequest{
+		{ID: "call1", Name: "read_file", Arguments: map[string]interface{}{"path": "file1.txt"}},
+		{ID: "call2", Name: "bash", Arguments: map[string]interface{}{"command": "echo hello"}},
+		{ID: "call3", Name: "read_file", Arguments: map[string]interface{}{"path": "file1.txt"}},
+	}
+
+	results := registry.ParallelDispatch(calls, 3)
+
+	if len(results) != 3 {
+		t.Fatalf("len(results) = %d, want 3", len(results))
+	}
+
+	// First call should succeed
+	if results[0].IsError {
+		t.Errorf("results[0].Error = %v", results[0].Error)
+	}
+
+	// Second call should succeed (bash)
+	if results[1].IsError {
+		t.Errorf("results[1].Error = %v", results[1].Error)
+	}
+}

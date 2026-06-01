@@ -45,10 +45,11 @@ type ToolFunc func(cwd string, args map[string]interface{}) (string, error)
 
 // RegisteredTool holds a tool definition and its execution function.
 type RegisteredTool struct {
-	Definition ToolDefinition
-	Execute    ToolFunc
-	ReadOnly   bool   // true for read-only tools (can run in parallel)
-	Concurrency string // "shared" (parallel) or "exclusive" (serial)
+	Definition    ToolDefinition
+	Execute       ToolFunc
+	ReadOnly      bool   // true for read-only tools (can run in parallel)
+	Concurrency   string // "shared" (parallel) or "exclusive" (serial)
+	ParallelSafe  bool   // true if tool can run alongside other parallel-safe tools
 }
 
 // ToolRegistry manages all available tools.
@@ -154,6 +155,111 @@ func (r *ToolRegistry) GetExclusiveTools() []string {
 	return names
 }
 
+// GetParallelSafeTools returns names of tools that can run in parallel.
+func (r *ToolRegistry) GetParallelSafeTools() []string {
+	var names []string
+	for name, tool := range r.tools {
+		if tool.ParallelSafe {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// ─── Parallel Dispatch (from DeepSeek-Reasonix) ───────────────
+
+// ToolCall represents a tool call to execute.
+type ToolCallRequest struct {
+	ID        string
+	Name      string
+	Arguments map[string]interface{}
+}
+
+// ToolCallResult represents the result of a tool call.
+type ToolCallResult struct {
+	ID      string
+	Name    string
+	Result  string
+	Error   error
+	IsError bool
+}
+
+// ParallelDispatch executes tool calls with parallel dispatch.
+// Consecutive parallelSafe calls are grouped and raced via goroutines.
+// The first non-parallel-safe call ends the chunk.
+func (r *ToolRegistry) ParallelDispatch(calls []ToolCallRequest, maxParallel int) []ToolCallResult {
+	if maxParallel <= 0 {
+		maxParallel = 3
+	}
+	if maxParallel > 16 {
+		maxParallel = 16
+	}
+
+	results := make([]ToolCallResult, len(calls))
+	callIdx := 0
+
+	for callIdx < len(calls) {
+		// Collect consecutive parallel-safe calls into a chunk
+		chunk := []int{} // indices into calls
+		for callIdx < len(calls) && len(chunk) < maxParallel {
+			tool := r.GetTool(calls[callIdx].Name)
+			if tool != nil && tool.ParallelSafe {
+				chunk = append(chunk, callIdx)
+				callIdx++
+			} else {
+				// First non-parallel-safe call ends the chunk
+				break
+			}
+		}
+
+		// If chunk is empty, execute the current call serially
+		if len(chunk) == 0 {
+			result := r.executeSingle(calls[callIdx])
+			results[callIdx] = result
+			callIdx++
+			continue
+		}
+
+		// Execute chunk in parallel
+		type indexedResult struct {
+			index  int
+			result ToolCallResult
+		}
+
+		resultCh := make(chan indexedResult, len(chunk))
+		for _, idx := range chunk {
+			go func(i int) {
+				result := r.executeSingle(calls[i])
+				resultCh <- indexedResult{index: i, result: result}
+			}(idx)
+		}
+
+		// Collect results (in declared order, not completion order)
+		for range chunk {
+			ir := <-resultCh
+			results[ir.index] = ir.result
+		}
+	}
+
+	return results
+}
+
+// executeSingle executes a single tool call and returns the result.
+func (r *ToolRegistry) executeSingle(call ToolCallRequest) ToolCallResult {
+	result, err := r.Execute(call.Name, call.Arguments)
+	isError := err != nil
+	if isError {
+		result = err.Error()
+	}
+	return ToolCallResult{
+		ID:      call.ID,
+		Name:    call.Name,
+		Result:  result,
+		Error:   err,
+		IsError: isError,
+	}
+}
+
 // ─── Built-in Tools ────────────────────────────────────────
 
 func (r *ToolRegistry) registerBuiltinTools() {
@@ -176,8 +282,9 @@ func (r *ToolRegistry) registerBuiltinTools() {
 				},
 			},
 		},
-		Execute:  executeReadFile,
-		ReadOnly: true,
+		Execute:      executeReadFile,
+		ReadOnly:     true,
+		ParallelSafe: true,
 	}
 
 	// write_file
@@ -254,8 +361,9 @@ func (r *ToolRegistry) registerBuiltinTools() {
 				},
 			},
 		},
-		Execute:  executeListDir,
-		ReadOnly: true,
+		Execute:      executeListDir,
+		ReadOnly:     true,
+		ParallelSafe: true,
 	}
 
 	// search_files (glob)
@@ -281,8 +389,9 @@ func (r *ToolRegistry) registerBuiltinTools() {
 				},
 			},
 		},
-		Execute:  executeSearchFiles,
-		ReadOnly: true,
+		Execute:      executeSearchFiles,
+		ReadOnly:     true,
+		ParallelSafe: true,
 	}
 
 	// grep (content search)
@@ -312,8 +421,9 @@ func (r *ToolRegistry) registerBuiltinTools() {
 				},
 			},
 		},
-		Execute:  executeGrep,
-		ReadOnly: true,
+		Execute:      executeGrep,
+		ReadOnly:     true,
+		ParallelSafe: true,
 	}
 
 	// bash (shell execution)
