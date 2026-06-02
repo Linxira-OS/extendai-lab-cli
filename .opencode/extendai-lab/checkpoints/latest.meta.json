@@ -1,0 +1,58 @@
+{
+  "checkpoint_kind": "heavy",
+  "checkpoint_scope": "cross-session",
+  "source_session_id": "current",
+  "created_at": "2026-06-03T00:00:00Z",
+  "goal": "全面调研 8 个参考项目，评估 DeepSeek-Reasonix Go 版本作为上游的可行性",
+  "status": "pending",
+  "session_switch_recommendation": "recommend-switch",
+  "summary": {
+    "projects_studied": 8,
+    "tests_written": 138,
+    "features_implemented": "P0-P2 (35% of full feature set)",
+    "key_finding": "DeepSeek-Reasonix main-v2 is Go 1.25 + bubbletea v2, has complete feature set",
+    "decision_pending": "Fork Reasonix vs continue Go vs Rust rewrite"
+  },
+  "reference_projects": {
+    "deepseek-reasonix": {
+      "language": "Go (main-v2 branch)",
+      "status": "Complete analysis done",
+      "key_features": "Agent loop, tool system, memory, skill, hook, permission, sandbox, LSP, MCP"
+    },
+    "pi": {
+      "language": "TypeScript",
+      "status": "Complete analysis done",
+      "key_features": "Pure function agent loop, EventStream, tool hooks"
+    },
+    "oh-my-pi": {
+      "language": "TypeScript + Rust",
+      "status": "Complete analysis done",
+      "key_features": "Harmony leak fix, OpenTelemetry, append-only context"
+    },
+    "codex": {
+      "language": "Rust",
+      "status": "Complete analysis done",
+      "key_features": "OS-level sandbox, Starlark policies, MCP server mode"
+    },
+    "CodeWhale": {
+      "language": "Rust",
+      "status": "Complete analysis done",
+      "key_features": "Tree-structured sessions, RwLock parallel, hook sinks"
+    },
+    "opencode-dev": {
+      "language": "TypeScript",
+      "status": "Complete analysis done",
+      "key_features": "Effect-TS architecture, 150+ tests, Mock LLM Server"
+    },
+    "opencode-pty": {
+      "language": "TypeScript",
+      "status": "Complete analysis done",
+      "key_features": "PTY management, background processes, notification system"
+    },
+    "deepcode-cli": {
+      "language": "TypeScript",
+      "status": "Partial analysis done",
+      "key_features": "LLM-based edit matching, Karpathy Guidelines, snippet system"
+    }
+  }
+}
