@@ -127,6 +127,19 @@ describe("hydrateCardsFromMessages", () => {
     expect(cards[0]).toMatchObject({ kind: "tool", args: "not-json", done: false });
   });
 
+  it("skips a partial tool_call missing its function instead of crashing hydration", () => {
+    const msgs: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: "recovered",
+        // biome-ignore lint/suspicious/noExplicitAny: a corrupt persisted session can carry a streaming-delta tool_call with no function, though the type marks it required
+        tool_calls: [{ id: "call-x", type: "function" } as any],
+      },
+    ];
+    const cards = hydrateCardsFromMessages(msgs);
+    expect(cards.map((c) => c.kind)).toEqual(["streaming"]);
+  });
+
   it("starts resumed long sessions with old heavy card fields already elided", () => {
     const huge = "large retained field\n".repeat(800);
     const msgs: ChatMessage[] = [];
