@@ -439,6 +439,10 @@ func i18nTranslations() map[string]map[string]string {
 
 func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Migrate v0.x / v1 legacy config on first visit so DesktopLanguage()
+	// reads the correct value from the start. Idempotent — no-op if the
+	// destination config.toml already exists.
+	config.MigrateLegacyIfNeeded()
 	lang := "en"
 	if cfg, err := config.Load(); err == nil {
 		if dl := cfg.DesktopLanguage(); dl != "" {
