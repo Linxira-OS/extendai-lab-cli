@@ -367,37 +367,37 @@ input,textarea{font:inherit;color:inherit}
   <div class="modal">
     <div class="modal__head">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
-      Statistics
+      __('statistics')
       <span class="modal__close" id="stats-modal-close">&times;</span>
     </div>
     <div class="modal__body">
       <div class="stat-grid">
         <div class="stat-card">
-          <div class="stat-card__label">Model</div>
+          <div class="stat-card__label">__('model')</div>
           <div class="stat-card__value" id="stats-model">-</div>
         </div>
         <div class="stat-card">
-          <div class="stat-card__label">Sessions</div>
+          <div class="stat-card__label">__('sessions')</div>
           <div class="stat-card__value" id="stats-sessions">0</div>
         </div>
         <div class="stat-card">
-          <div class="stat-card__label">Total Tokens</div>
+          <div class="stat-card__label">__('total_tokens')</div>
           <div class="stat-card__value acc" id="stats-total-tokens">0</div>
         </div>
         <div class="stat-card">
-          <div class="stat-card__label">Cache Hit Rate</div>
+          <div class="stat-card__label">__('cache_hit_rate')</div>
           <div class="stat-card__value ok" id="stats-cache-rate">0%</div>
         </div>
         <div class="stat-card">
-          <div class="stat-card__label">Total Cost</div>
+          <div class="stat-card__label">__('total_cost')</div>
           <div class="stat-card__value" id="stats-total-cost">-</div>
         </div>
         <div class="stat-card">
-          <div class="stat-card__label">Balance</div>
+          <div class="stat-card__label">__('balance')</div>
           <div class="stat-card__value" id="stats-balance">-</div>
         </div>
         <div class="stat-card stat-card--wide">
-          <div class="stat-card__label">Context Usage</div>
+          <div class="stat-card__label">__('context_usage')</div>
           <div class="ctx-bar" style="margin-top:8px"><div class="ctx-bar__fill" id="stats-ctx-fill" style="width:0%"></div></div>
           <div class="ctx-label" style="margin-top:4px"><span id="stats-ctx-used">0 tok</span><span id="stats-ctx-window">0 tok</span></div>
         </div>
@@ -422,6 +422,13 @@ const __T = {
     'balance': 'Balance',
     'ready': 'Ready',
     'thinking': 'Thinking...',
+    'statistics': 'Statistics',
+    'model': 'Model',
+    'total_tokens': 'Total Tokens',
+    'cache_hit_rate': 'Cache Hit Rate',
+    'total_cost': 'Total Cost',
+    'context_usage': 'Context Usage',
+
     'connected': 'Connected',
     'reconnecting': 'Reconnecting...',
     'disconnected': 'Disconnected',
@@ -499,6 +506,13 @@ const __T = {
     'balance': '余额',
     'ready': '就绪',
     'thinking': '思考中...',
+    'statistics': '统计',
+    'model': '模型',
+    'total_tokens': '总 Token',
+    'cache_hit_rate': '缓存命中率',
+    'total_cost': '总费用',
+    'context_usage': '上下文用量',
+
     'connected': '已连接',
     'reconnecting': '重新连接...',
     'disconnected': '已断开',

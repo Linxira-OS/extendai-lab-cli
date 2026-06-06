@@ -213,7 +213,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
-tmux.HandleFunc("POST /delete-session", s.deleteSession)
+	mux.HandleFunc("POST /delete-session", s.deleteSession)
 	return logMiddleware(csrfGuard(mux))
 }
 
@@ -293,6 +293,12 @@ func i18nTranslations() map[string]map[string]string {
 			"balance":     "Balance",
 			"ready":       "Ready",
 			"thinking":    "Thinking...",
+			"statistics":  "Statistics",
+			"model":       "Model",
+			"total_tokens": "Total Tokens",
+			"cache_hit_rate": "Cache Hit Rate",
+			"total_cost":  "Total Cost",
+			"context_usage": "Context Usage",
 		},
 		"zh": {
 			"new_session": "新会话",
@@ -307,6 +313,12 @@ func i18nTranslations() map[string]map[string]string {
 			"balance":     "余额",
 			"ready":       "就绪",
 			"thinking":    "思考中...",
+			"statistics":  "统计",
+			"model":       "模型",
+			"total_tokens": "总 Token",
+			"cache_hit_rate": "缓存命中率",
+			"total_cost":  "总费用",
+			"context_usage": "上下文用量",
 		},
 	}
 }
@@ -323,7 +335,8 @@ func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 	html = strings.ReplaceAll(html, "__LANG__", lang)
 	// Server-side i18n: replace __('key') in static HTML text nodes.
 	// JS __() handles dynamic content; this handles the initial render.
-	if trans, ok := i18nTranslations()[lang]; ok {
+	i18nMap := i18nTranslations()
+	if trans, ok := i18nMap[lang]; ok {
 		for key, val := range trans {
 			html = strings.ReplaceAll(html, "__('"+key+"')", val)
 		}
@@ -984,3 +997,4 @@ func (s *Server) skills(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, out)
 }
+// DEBUG: verify stat-card__label text exists in HTML
