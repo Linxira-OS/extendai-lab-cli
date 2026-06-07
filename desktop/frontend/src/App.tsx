@@ -54,6 +54,7 @@ import {
   type Theme,
 } from "./lib/theme";
 import { useWindowStatePersistence } from "./lib/windowState";
+import logoSymbol from "./assets/logo-symbol.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
 const SIDEBAR_DEFAULT_WIDTH = 264;
@@ -1334,6 +1335,10 @@ export default function App() {
     ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
     : defaultRightDockTreeWidth();
   const workspacePanelMaxWidth = workspacePreviewActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
+  const topicbarSubtitle = [
+    activeTab?.scope === "project" ? activeTab.workspaceRoot || state.meta?.cwd : activeTab?.scope === "global" ? t("scope.global") : "",
+    state.meta?.label ?? "",
+  ].filter(Boolean).join(" · ");
 
   return (
     <ShellExpandProvider>
@@ -1405,6 +1410,14 @@ export default function App() {
         </header>
 
         <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label={t("sidebar.navigation")}>
+          <div className="sidebar__brand" aria-hidden={sidebarCollapsed}>
+            <img src={logoSymbol} alt="" />
+            <div className="sidebar__brand-copy">
+              <strong>Reasonix</strong>
+              <span>{state.meta?.label ?? t("status.connecting")}</span>
+            </div>
+          </div>
+
           <Tooltip label={t("topbar.newSession")} fill>
             <button
               className="sidebar__new"
@@ -1500,6 +1513,10 @@ export default function App() {
 
           <>
           <header className="topicbar">
+            <div className="topicbar__scope-pill" title={topicScopeLabel(activeTab)}>
+              <GitBranch size={13} />
+              <span>{topicScopeLabel(activeTab)}</span>
+            </div>
             <div className="topicbar__identity">
               <div className="topicbar__title-row">
                 {topicbarEditing ? (
@@ -1540,9 +1557,19 @@ export default function App() {
                   </button>
                 </Tooltip>
               </div>
+              {topicbarSubtitle && <div className="topicbar__subtitle">{topicbarSubtitle}</div>}
             </div>
             <div className="topicbar__spacer" />
             <div className="topicbar__actions">
+              <button
+                className="topicbar__action-btn topicbar__action-btn--label"
+                type="button"
+                aria-pressed={workspacePanelRenderable && rightDockMode === "changed"}
+                onClick={() => openRightDockMode("changed")}
+              >
+                <GitBranch size={14} />
+                <span>{t("workspace.changedTab")}</span>
+              </button>
               <CopyButton
                 getText={getSessionMarkdown}
                 label={t("topicBar.copyAll")}
