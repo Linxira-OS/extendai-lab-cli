@@ -351,6 +351,12 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "frontend", "wailsjs", "runtime", "runtime.js"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend", "Thumbs.db"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend", ".DS_Store"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -363,25 +369,78 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".codegraph", "cache", "runtime.js"), []byte("index"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	for _, noise := range []string{".codex", ".npm", ".pnpm-store", "bin", "dist", "stage", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(dir, noise), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, noise, "runtime.js"), []byte("noise"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "desktop", "frontend", "wailsjs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "desktop", "frontend", "wailsjs", "runtime.js"), []byte("generated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "product", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "product", "bin", "runtime.js"), []byte("real"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
 
 	app := &App{}
 	listed := app.ListDir("")
-	if hasDirEntry(listed, ".codegraph") {
-		t.Fatalf("ListDir should hide CodeGraph project index, got %+v", listed)
+	for _, hidden := range []string{".codex", ".codegraph", ".npm", ".pnpm-store", "bin", "dist", "stage", "tmp"} {
+		if hasDirEntry(listed, hidden) {
+			t.Fatalf("ListDir should hide local noise %q, got %+v", hidden, listed)
+		}
+	}
+	desktopFrontend := app.ListDir("desktop/frontend")
+	if hasDirEntry(desktopFrontend, "wailsjs") {
+		t.Fatalf("ListDir should hide generated Wails bindings, got %+v", desktopFrontend)
+	}
+	frontendEntries := app.ListDir("frontend")
+	for _, hidden := range []string{".DS_Store", "Thumbs.db"} {
+		if hasDirEntry(frontendEntries, hidden) {
+			t.Fatalf("ListDir should hide local noise file %q, got %+v", hidden, frontendEntries)
+		}
 	}
 
 	got := app.SearchFileRefs("runtime.js")
 	if !hasDirEntry(got, "frontend/wailsjs/runtime/runtime.js") {
 		t.Fatalf("SearchFileRefs(runtime.js) should find nested workspace file, got %+v", got)
 	}
+	if !hasDirEntry(got, "product/bin/runtime.js") {
+		t.Fatalf("SearchFileRefs should keep non-root bin directories searchable, got %+v", got)
+	}
 	if hasDirEntry(got, "node_modules/pkg/runtime.js") {
 		t.Fatalf("SearchFileRefs should skip node_modules noise, got %+v", got)
 	}
-	if hasDirEntry(got, ".codegraph/cache/runtime.js") {
-		t.Fatalf("SearchFileRefs should skip CodeGraph project index, got %+v", got)
+	for _, hidden := range []string{
+		".codex/runtime.js",
+		".codegraph/cache/runtime.js",
+		".npm/runtime.js",
+		".pnpm-store/runtime.js",
+		"bin/runtime.js",
+		"desktop/frontend/wailsjs/runtime.js",
+		"dist/runtime.js",
+		"stage/runtime.js",
+		"tmp/runtime.js",
+	} {
+		if hasDirEntry(got, hidden) {
+			t.Fatalf("SearchFileRefs should skip local noise %q, got %+v", hidden, got)
+		}
+	}
+	if noise := app.SearchFileRefs("Thumbs"); hasDirEntry(noise, "frontend/Thumbs.db") {
+		t.Fatalf("SearchFileRefs should skip Thumbs.db noise, got %+v", noise)
+	}
+	if noise := app.SearchFileRefs(".DS"); hasDirEntry(noise, "frontend/.DS_Store") {
+		t.Fatalf("SearchFileRefs should skip .DS_Store noise even for dot-prefixed search, got %+v", noise)
 	}
 }
 
