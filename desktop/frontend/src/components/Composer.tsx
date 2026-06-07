@@ -150,6 +150,7 @@ export function Composer({
   turnTokens,
   retry,
   workspaceRefreshSignal,
+  transientDismissSignal,
 }: {
   running: boolean;
   mode: Mode;
@@ -179,6 +180,7 @@ export function Composer({
   turnTokens?: number;
   retry?: { attempt: number; max: number };
   workspaceRefreshSignal?: number;
+  transientDismissSignal?: number;
 }) {
   const { t, locale } = useI18n();
   const now = useTick(running);
@@ -215,6 +217,7 @@ export function Composer({
   const lastCompositionEndAt = useRef(0);
   const lastSelectionRef = useRef({ start: 0, end: 0 });
   const consumedInsertIdRef = useRef(0);
+  const lastTransientDismissSignal = useRef(transientDismissSignal);
 
   useEffect(() => {
     if (wasRunning.current && !running && text.trim() === "") {
@@ -386,6 +389,14 @@ export function Composer({
     setActive(0);
     setDismissed(false);
   }, [slashQuery, atRaw]);
+
+  useEffect(() => {
+    if (transientDismissSignal === undefined || transientDismissSignal === lastTransientDismissSignal.current) return;
+    lastTransientDismissSignal.current = transientDismissSignal;
+    setDismissed(true);
+    setWorkspaceMenuOpen(false);
+    setConfirmRemovePath(null);
+  }, [transientDismissSignal]);
 
   const setTextCaretEnd = (next: string) => {
     setText(next);

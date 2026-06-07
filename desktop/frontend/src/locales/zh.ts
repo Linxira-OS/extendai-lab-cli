@@ -44,18 +44,18 @@ export const zh: Record<DictKey, string> = {
   "sidebar.workspace": "工作区",
   "sidebar.changeWorkspace": "更改",
   "sidebar.navigation": "Reasonix 导航",
-  "sidebar.collapse": "收起侧边栏",
-  "sidebar.expand": "展开侧边栏",
-  "sidebar.expandBlocked": "关闭右侧文件面板后可展开侧边栏",
-  "sidebar.resize": "调整侧边栏宽度",
+  "sidebar.collapse": "收起导航",
+  "sidebar.expand": "展开导航",
+  "sidebar.expandBlocked": "关闭工作区面板后可展开导航",
+  "sidebar.resize": "调整导航栏宽度",
   "drawer.resize": "调整抽屉宽度",
 
   // 右侧停靠区
-  "rightDock.resize": "调整右侧面板宽度",
-  "rightDock.expand": "展开右侧工作区",
-  "rightDock.collapse": "收起右侧工作区",
-  "rightDock.workbench": "右侧工作台",
-  "rightDock.views": "右侧工作台视图",
+  "rightDock.resize": "调整工作区面板宽度",
+  "rightDock.expand": "展开工作区",
+  "rightDock.collapse": "收起工作区",
+  "rightDock.workbench": "工作区面板",
+  "rightDock.views": "工作区视图",
   "rightDock.overview": "概览",
 
   // 话题栏

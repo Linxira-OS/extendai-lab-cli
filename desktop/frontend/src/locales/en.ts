@@ -43,18 +43,18 @@ export const en = {
   "sidebar.workspace": "Workspace",
   "sidebar.changeWorkspace": "Change",
   "sidebar.navigation": "Reasonix navigation",
-  "sidebar.collapse": "Collapse sidebar",
-  "sidebar.expand": "Expand sidebar",
-  "sidebar.expandBlocked": "Close the right file panel before expanding the sidebar",
-  "sidebar.resize": "Resize sidebar",
+  "sidebar.collapse": "Collapse navigation",
+  "sidebar.expand": "Expand navigation",
+  "sidebar.expandBlocked": "Close the workspace panel before expanding navigation",
+  "sidebar.resize": "Resize navigation",
   "drawer.resize": "Resize drawer",
 
   // right dock
-  "rightDock.resize": "Resize right panel",
-  "rightDock.expand": "Expand right workspace",
-  "rightDock.collapse": "Collapse right workspace",
-  "rightDock.workbench": "Right workbench",
-  "rightDock.views": "Right workbench views",
+  "rightDock.resize": "Resize workspace panel",
+  "rightDock.expand": "Expand workspace",
+  "rightDock.collapse": "Collapse workspace",
+  "rightDock.workbench": "Workspace panel",
+  "rightDock.views": "Workspace views",
   "rightDock.overview": "Overview",
 
   // topic bar
