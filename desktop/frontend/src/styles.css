@@ -4467,6 +4467,145 @@ a[href] {
 .drawer-backdrop--subtle {
   background: rgba(0, 0, 0, 0.16);
 }
+
+/* ── command palette (⌘K) — centered modal over a dimmed backdrop ─────────── */
+.drawer-backdrop:has(> .palette) {
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.palette {
+  width: min(620px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  animation: palette-in 0.16s cubic-bezier(0.34, 1.4, 0.5, 1);
+}
+@keyframes palette-in {
+  from {
+    transform: translateY(-12px) scale(0.97);
+    opacity: 0;
+  }
+}
+.palette__inputrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.palette__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+}
+.palette__input::placeholder {
+  color: var(--fg-faint);
+}
+.palette__esc {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 6px;
+}
+.palette__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+.palette__empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+.palette__group + .palette__group {
+  margin-top: 6px;
+}
+.palette__group-title {
+  padding: 8px 12px 4px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.palette__item {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.palette__item--on {
+  background: var(--accent-soft);
+}
+.palette__title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette__item--on .palette__title {
+  color: var(--accent);
+}
+.palette__hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette__foot {
+  flex: none;
+  display: flex;
+  gap: 16px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.palette__foot kbd {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  margin-right: 3px;
+}
 .drawer {
   position: relative;
   width: min(var(--drawer-width, 440px), 92vw);

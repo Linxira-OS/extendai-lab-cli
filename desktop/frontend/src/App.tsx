@@ -27,6 +27,7 @@ import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { StatusBar } from "./components/StatusBar";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
@@ -372,6 +373,8 @@ export default function App() {
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteSessions, setPaletteSessions] = useState<SessionMeta[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
@@ -1195,6 +1198,49 @@ export default function App() {
     },
     [openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession],
   );
+
+  // Command palette: ⌘K / Ctrl+K opens a fuzzy navigator over commands and
+  // recent sessions. Sessions are snapshotted on open so the list is stable
+  // while the palette is up.
+  const openPalette = useCallback(async () => {
+    closeTransientOverlays();
+    setPaletteOpen(true);
+    setPaletteSessions(await listSessions().catch(() => []));
+  }, [closeTransientOverlays, listSessions]);
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((cur) => {
+          if (!cur) void openPalette();
+          return cur;
+        });
+      } else if (e.key === "Escape") {
+        setPaletteOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [openPalette]);
+  const paletteItems = useMemo<PaletteItem[]>(() => {
+    const cmds: PaletteItem[] = [
+      { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), keywords: ["new", "新建"], run: () => void newSession() },
+      { id: "cmd-history", group: t("palette.group.commands"), title: t("palette.cmd.history"), keywords: ["history", "历史"], run: () => void openAllHistory() },
+      { id: "cmd-trash", group: t("palette.group.commands"), title: t("palette.cmd.trash"), keywords: ["trash", "回收站"], run: () => void openTrash() },
+      { id: "cmd-settings", group: t("palette.group.commands"), title: t("palette.cmd.settings"), keywords: ["settings", "设置"], run: () => setSettingsTarget("general") },
+      { id: "cmd-appearance", group: t("palette.group.commands"), title: t("palette.cmd.appearance"), keywords: ["theme", "appearance", "外观", "主题"], run: () => setSettingsTarget("appearance") },
+      { id: "cmd-memory", group: t("palette.group.commands"), title: t("palette.cmd.memory"), keywords: ["memory", "记忆"], run: () => setSettingsTarget("memory") },
+      { id: "cmd-models", group: t("palette.group.commands"), title: t("palette.cmd.models"), keywords: ["model", "模型"], run: () => setSettingsTarget("models") },
+    ];
+    const sessionItems: PaletteItem[] = paletteSessions.slice(0, 12).map((s) => ({
+      id: `sess-${s.path}`,
+      group: t("palette.group.sessions"),
+      title: s.title?.trim() || s.preview || t("history.emptySession"),
+      hint: s.workspaceRoot || undefined,
+      run: () => void onResumeSession(s),
+    }));
+    return [...cmds, ...sessionItems];
+  }, [t, paletteSessions, newSession, openAllHistory, openTrash, onResumeSession]);
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
   const onDeleteSession = useCallback(
     async (path: string) => {
@@ -1819,6 +1865,14 @@ export default function App() {
           onChanged={() => void refreshMeta()}
         />
       )}
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        items={paletteItems}
+        placeholder={t("palette.placeholder")}
+        emptyText={t("palette.empty")}
+      />
 
       {startupSplashVisible && (
         <StartupSplash hold={startupSplashHold} onDone={() => setStartupSplashVisible(false)} />
