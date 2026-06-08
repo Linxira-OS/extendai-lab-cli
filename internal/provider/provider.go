@@ -279,7 +279,7 @@ func (e *AuthError) Error() string {
 	if e.KeyEnv != "" {
 		key = e.KeyEnv
 	}
-	return fmt.Sprintf("authentication failed for provider %q (HTTP %d): %s is invalid or expired — update it (in .env or your environment) and retry, or run `reasonix setup`",
+	return fmt.Sprintf("authentication failed for provider %q (HTTP %d): %s is invalid or expired — update it (in .env or your environment) and retry, or run `extendai-lab setup`",
 		e.Provider, e.Status, key)
 }
 

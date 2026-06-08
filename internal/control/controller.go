@@ -767,7 +767,7 @@ func (c *Controller) notice(text string) {
 }
 
 // Run executes a turn synchronously, returning the agent's error. Used by the
-// headless `reasonix run` path, where the Sink renders to stdout and the caller
+// headless `extendai-lab run` path, where the Sink renders to stdout and the caller
 // just needs the exit status — no TurnDone event, no cancel bookkeeping.
 func (c *Controller) Run(ctx context.Context, input string) error {
 	c.maybeSessionStart(ctx)
@@ -1569,7 +1569,7 @@ func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
 
 // ConnectMCPServer connects an MCP server entry for this session without writing
 // it to config. Desktop owns config placement so it can keep user-level settings
-// out of project reasonix.toml while preserving the CLI AddMCPServer semantics.
+// out of project extendai-lab.toml while preserving the CLI AddMCPServer semantics.
 func (c *Controller) ConnectMCPServer(e config.PluginEntry) (int, error) {
 	return c.connectMCPServer(e)
 }

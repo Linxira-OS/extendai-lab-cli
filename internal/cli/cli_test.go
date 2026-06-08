@@ -113,7 +113,7 @@ func TestRunDispatchesACPLongFlagAlias(t *testing.T) {
 
 func TestRunMigratesLegacyConfigBeforeConfigOnlyCommands(t *testing.T) {
 	isolateCLIConfigHome(t)
-	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
+	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "extendai-lab.toml")
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ command = "legacy-bin"
 
 func TestRunMetadataCommandsDoNotMigrateLegacyConfig(t *testing.T) {
 	isolateCLIConfigHome(t)
-	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
+	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "extendai-lab.toml")
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestConfigAutoPlanLocalCreatesMinimalProjectOverride(t *testing.T) {
 		t.Fatalf("config auto-plan --local output = %q", out)
 	}
 
-	body, err := os.ReadFile("reasonix.toml")
+	body, err := os.ReadFile("extendai-lab.toml")
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
@@ -232,10 +232,10 @@ func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
 	if welcomeShouldPromptMissingKeys("", nil) {
 		t.Fatal("built-in defaults without a config source should not prompt for missing provider keys")
 	}
-	if welcomeShouldPromptMissingKeys("reasonix.toml", errors.New("bad config")) {
+	if welcomeShouldPromptMissingKeys("extendai-lab.toml", errors.New("bad config")) {
 		t.Fatal("invalid config should not enter the missing-key prompt path")
 	}
-	if !welcomeShouldPromptMissingKeys("reasonix.toml", nil) {
+	if !welcomeShouldPromptMissingKeys("extendai-lab.toml", nil) {
 		t.Fatal("valid config source should enter the missing-key prompt path")
 	}
 }
@@ -642,7 +642,7 @@ func TestProviderSlug(t *testing.T) {
 
 // TestFilterStaleCustomEntries covers the wizard's auto-cleanup of legacy
 // "custom" / "anthropic" magic-name entries that previous versions wrote
-// into reasonix.toml. These collide with the wizard's own menu items, so
+// into extendai-lab.toml. These collide with the wizard's own menu items, so
 // they're dropped from the providers list before grouping — but the caller
 // still gets them back in the dropped slice to surface a warning.
 func TestFilterStaleCustomEntries(t *testing.T) {
@@ -690,7 +690,7 @@ func TestFilterStaleCustomEntries(t *testing.T) {
 }
 
 func TestWithBuiltinFamiliesAddsMissingMiMo(t *testing.T) {
-	// The user's case: a reasonix.toml that defines only deepseek providers.
+	// The user's case: a extendai-lab.toml that defines only deepseek providers.
 	cfg := []config.ProviderEntry{
 		{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com"},
 		{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com"},
@@ -715,7 +715,7 @@ func groupByFamilyKeys(ps []config.ProviderEntry, key string) []int {
 }
 
 func TestWriteDefaultConfigDisablesCodegraph(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	path := filepath.Join(t.TempDir(), "extendai-lab.toml")
 	if rc := writeDefaultConfig(path); rc != 0 {
 		t.Fatalf("writeDefaultConfig rc = %d", rc)
 	}

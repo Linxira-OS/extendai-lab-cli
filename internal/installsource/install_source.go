@@ -458,7 +458,7 @@ func (t *installSourceTool) configPath(scope string) string {
 			return p
 		}
 	}
-	return filepath.Join(t.root, "reasonix.toml")
+	return filepath.Join(t.root, "extendai-lab.toml")
 }
 
 func (t *installSourceTool) normalizeScope(scope string) string {

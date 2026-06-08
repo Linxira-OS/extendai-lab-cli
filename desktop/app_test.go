@@ -221,7 +221,7 @@ func TestSettingsUsesUserDesktopPreferencesNotProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(project, "extendai-lab.toml"), []byte(`
 [desktop]
 language = "zh"
 theme = "light"
@@ -261,7 +261,7 @@ func TestSettingsSeedsMissingUserConfigFromLegacyProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(project, "extendai-lab.toml"), []byte(`
 default_model = "legacy-provider/legacy-model"
 
 [desktop]
@@ -1219,7 +1219,7 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	workspace := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "extendai-lab.toml"), []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
 	dir := config.SessionDir()
@@ -1313,7 +1313,7 @@ func TestCapabilitiesShowsDefaultMCPAsInitializingNotDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1379,7 +1379,7 @@ func TestCapabilitiesMarksBackgroundRemoteMCPAuthPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1412,7 +1412,7 @@ func TestCapabilitiesDoesNotMarkRemoteMCPWithAuthHeaderPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1446,7 +1446,7 @@ func TestCapabilitiesMarksAuthFailureRequired(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1481,7 +1481,7 @@ func TestClearMCPServerAuthenticationClearsConfigAndFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1544,7 +1544,7 @@ func TestUpdateMCPServerMigratesLegacyTierToBackground(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1595,7 +1595,7 @@ tier = "lazy"
 	if userPlugin.Tier != "" {
 		t.Fatalf("user plugin tier = %q, want migrated empty", userPlugin.Tier)
 	}
-	projectCfg := config.LoadForEdit(filepath.Join(dir, "reasonix.toml"))
+	projectCfg := config.LoadForEdit(filepath.Join(dir, "extendai-lab.toml"))
 	if _, ok := findPluginEntry(projectCfg.Plugins, "playwright"); ok {
 		t.Fatalf("project plugin should be removed after desktop migration: %+v", projectCfg.Plugins)
 	}
@@ -1618,7 +1618,7 @@ func TestUpdateMCPServerSplitsPastedCommandLine(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1658,7 +1658,7 @@ func TestUpdateMCPServerRecordsReconnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1713,7 +1713,7 @@ func TestSetMCPServerTierRecordsConnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1751,7 +1751,7 @@ tier = "lazy"
 	if userPlugin.Tier != "" {
 		t.Fatalf("user plugin tier = %q, want migrated empty", userPlugin.Tier)
 	}
-	projectCfg := config.LoadForEdit(filepath.Join(dir, "reasonix.toml"))
+	projectCfg := config.LoadForEdit(filepath.Join(dir, "extendai-lab.toml"))
 	if _, ok := findPluginEntry(projectCfg.Plugins, "broken"); ok {
 		t.Fatalf("project plugin should be removed after desktop migration: %+v", projectCfg.Plugins)
 	}
@@ -1782,7 +1782,7 @@ func TestSetMCPServerTierPersistsCodegraphConfig(t *testing.T) {
 	t.Setenv("REASONIX_CACHE_DIR", robustTempDir(t)) // isolate the codegraph bundle cache so Resolve fails deterministically
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 auto_install = true
@@ -1836,7 +1836,7 @@ func TestSetMCPServerEnabledPersistsCodegraphOff(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = true
 tier = "lazy"
@@ -1878,7 +1878,7 @@ func TestCapabilitiesMigratesFailedMCPConfiguredTierAfterRestart(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
 [codegraph]
 enabled = false
 

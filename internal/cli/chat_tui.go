@@ -3242,7 +3242,7 @@ func replaySectionsFor(history []provider.Message, width int, renderer *mdRender
 // at the top of the session.
 func renderTUIBanner(label, missing string, width int) string {
 	var b strings.Builder
-	b.WriteString(accent("◆") + " " + bold("reasonix chat") + "  " + dim("· "+label) + "\n")
+	b.WriteString(accent("◆") + " " + bold("extendai-lab chat") + "  " + dim("· "+label) + "\n")
 	b.WriteString(dim("  "+i18n.M.ChatTip) + "\n")
 	if missing != "" {
 		b.WriteString(wrapForViewport("  ! "+missing, width, activeCLITheme.warn) + "\n")

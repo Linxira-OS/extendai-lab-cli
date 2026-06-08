@@ -1,5 +1,5 @@
 // Package config loads Reasonix's runtime configuration from TOML. Resolution order:
-// flag > project ./reasonix.toml > user ~/.config/reasonix/config.toml > built-in defaults.
+// flag > project ./extendai-lab.toml > user ~/.config/reasonix/config.toml > built-in defaults.
 // Secrets come from the environment via api_key_env and are never stored in
 // config files.
 package config
@@ -673,7 +673,7 @@ type PermissionsConfig struct {
 // static Headers. String fields support ${VAR} / ${VAR:-default} expansion so
 // secrets (bearer tokens, keys) come from the environment, not the file. The
 // fields mirror Claude Code's mcpServers spec, so entries can come from either
-// reasonix.toml's [[plugins]] or a project-root .mcp.json (see loadMCPJSON).
+// extendai-lab.toml's [[plugins]] or a project-root .mcp.json (see loadMCPJSON).
 type PluginEntry struct {
 	Name    string            `toml:"name"`
 	Type    string            `toml:"type"` // "stdio" (default) | "http" | "sse"
@@ -781,8 +781,8 @@ func Default() *Config {
 			CompactRatio:      0.8,
 			CompactForceRatio: 0.9,
 		},
-		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
-		// resolves to allow) while `reasonix chat` prompts before writers. Users add
+		// Mode "ask" with no rules keeps `extendai-lab run` autonomous (no TTY → ask
+		// resolves to allow) while `extendai-lab chat` prompts before writers. Users add
 		// deny/allow rules to harden or quiet specific tools.
 		Permissions: PermissionsConfig{Mode: "ask"},
 		// Sandbox on by default: bash is jailed (macOS), network allowed so
@@ -819,16 +819,16 @@ func Load() (*Config, error) {
 // LoadForRoot builds the configuration with project files resolved from root
 // instead of the current working directory. When root is "" or ".", it behaves
 // like Load(). This is the workspace-aware entry point: desktop tabs use it so
-// each project's reasonix.toml + .env + .mcp.json are resolved independently
+// each project's extendai-lab.toml + .env + .mcp.json are resolved independently
 // without changing the process cwd.
 func LoadForRoot(root string) (*Config, error) {
 	root = resolveRoot(root)
 	loadDotEnvForRoot(root)
 	cfg := Default()
 
-	projectTOML := "reasonix.toml"
+	projectTOML := "extendai-lab.toml"
 	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
+		projectTOML = filepath.Join(root, "extendai-lab.toml")
 	}
 
 	var tomlSources []string
@@ -850,7 +850,7 @@ func LoadForRoot(root string) (*Config, error) {
 	}
 	// toml.DecodeFile replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
-	// project reasonix.toml doesn't drop the global config's MCP servers.
+	// project extendai-lab.toml doesn't drop the global config's MCP servers.
 	plugins, err := mergeTOMLPlugins(tomlSources)
 	if err != nil {
 		return nil, err
@@ -859,7 +859,7 @@ func LoadForRoot(root string) (*Config, error) {
 
 	// Claude Code's .mcp.json (project root) is read last and merged into
 	// [[plugins]], so a server configured for Claude works here unchanged.
-	// reasonix.toml wins on a name collision (see mergeMCPJSON).
+	// extendai-lab.toml wins on a name collision (see mergeMCPJSON).
 	mcpFile := mcpJSONFile
 	if root != "." {
 		mcpFile = filepath.Join(root, mcpJSONFile)
@@ -970,7 +970,7 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 	return merged, nil
 }
 
-// LoadForEdit returns a config to seed the `reasonix setup` wizard when reconfiguring:
+// LoadForEdit returns a config to seed the `extendai-lab setup` wizard when reconfiguring:
 // the built-in defaults with the file at path (if present) decoded on top, so a
 // reconfigure preserves the user's existing providers and agent settings instead
 // of resetting to defaults. .env is loaded so api_key_env resolution works while
@@ -1441,7 +1441,7 @@ func ArchiveDir() string {
 }
 
 // SessionDir is where chat sessions are persisted (one .jsonl per session).
-// Used by `reasonix chat --continue` / `--resume` to find the recent ones. Empty
+// Used by `extendai-lab chat --continue` / `--resume` to find the recent ones. Empty
 // if the user config dir can't be resolved — sessions then aren't saved.
 func SessionDir() string {
 	dir, err := os.UserConfigDir()
@@ -1531,9 +1531,9 @@ func SourcePath() string {
 // root, or "" if none. Equivalent to SourcePath() when root is ".".
 func SourcePathForRoot(root string) string {
 	root = resolveRoot(root)
-	projectTOML := "reasonix.toml"
+	projectTOML := "extendai-lab.toml"
 	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
+		projectTOML = filepath.Join(root, "extendai-lab.toml")
 	}
 	if _, err := os.Stat(projectTOML); err == nil {
 		return projectTOML

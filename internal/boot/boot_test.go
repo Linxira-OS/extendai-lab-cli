@@ -37,7 +37,7 @@ func TestBuildFoldsProjectMemoryIntoSystemPrompt(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 
-	writeFile(t, dir, "reasonix.toml", `
+	writeFile(t, dir, "extendai-lab.toml", `
 default_model = "test-model"
 
 [codegraph]
@@ -167,7 +167,7 @@ func TestBuildDiscoversSkills(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
-	writeFile(t, dir, "reasonix.toml", `
+	writeFile(t, dir, "extendai-lab.toml", `
 default_model = "test-model"
 
 [codegraph]
@@ -237,7 +237,7 @@ func TestBuildOmitsDisabledSkillsFromPromptAndRuntimeList(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
-	writeFile(t, dir, "reasonix.toml", `
+	writeFile(t, dir, "extendai-lab.toml", `
 default_model = "test-model"
 
 [codegraph]
@@ -293,7 +293,7 @@ func TestBuildOmitsExcludedSkillRootsFromPromptAndRuntimeList(t *testing.T) {
 	excluded := filepath.Join(home, ".agents", "skills")
 	writeFile(t, home, ".extendai-lab/skills/keep.md", "---\ndescription: keep\n---\nplaybook")
 	writeFile(t, home, ".agents/skills/noisy.md", "---\ndescription: noisy\n---\nplaybook")
-	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+	writeFile(t, dir, "extendai-lab.toml", fmt.Sprintf(`
 default_model = "test-model"
 
 [codegraph]
@@ -339,7 +339,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 func TestBuildWithoutMemoryLeavesPromptUnchanged(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	writeFile(t, dir, "reasonix.toml", `
+	writeFile(t, dir, "extendai-lab.toml", `
 default_model = "test-model"
 
 [codegraph]
@@ -383,7 +383,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 func TestBuildLanguagePolicyIsAppended(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	writeFile(t, dir, "reasonix.toml", `
+	writeFile(t, dir, "extendai-lab.toml", `
 default_model = "test-model"
 
 [codegraph]
@@ -448,11 +448,11 @@ func TestRememberPermissionRuleUsesWorkspaceRoot(t *testing.T) {
 	cwd := robustTempDir(t)
 	workspace := robustTempDir(t)
 	t.Chdir(cwd)
-	writeFile(t, cwd, "reasonix.toml", `
+	writeFile(t, cwd, "extendai-lab.toml", `
 [permissions]
 allow = ["bash(cwd*)"]
 `)
-	writeFile(t, workspace, "reasonix.toml", `
+	writeFile(t, workspace, "extendai-lab.toml", `
 [permissions]
 allow = ["bash(workspace*)"]
 `)
@@ -460,11 +460,11 @@ allow = ["bash(workspace*)"]
 	const rule = "bash=go test ./..."
 	rememberPermissionRule(workspace, rule)
 
-	cwdCfg := config.LoadForEdit(filepath.Join(cwd, "reasonix.toml"))
+	cwdCfg := config.LoadForEdit(filepath.Join(cwd, "extendai-lab.toml"))
 	if hasPermissionRule(cwdCfg.Permissions.Allow, rule) {
 		t.Fatalf("remembered rule was written to cwd config: %v", cwdCfg.Permissions.Allow)
 	}
-	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "extendai-lab.toml"))
 	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
 		t.Fatalf("remembered rule missing from workspace config: %v", workspaceCfg.Permissions.Allow)
 	}
@@ -492,7 +492,7 @@ allow = ["bash(user*)"]
 	if !hasPermissionRule(userCfg.Permissions.Allow, rule) {
 		t.Fatalf("empty root should remember into SourcePath config: %v", userCfg.Permissions.Allow)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, "reasonix.toml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(cwd, "extendai-lab.toml")); !os.IsNotExist(err) {
 		t.Fatalf("empty root should not create cwd config when SourcePath exists, err=%v", err)
 	}
 }
@@ -521,7 +521,7 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 	t.Chdir(proj)
 	// codegraph off keeps Build offline; it merges over the migrated user config
 	// without dropping the migrated plugins.
-	writeFile(t, proj, "reasonix.toml", "[codegraph]\nenabled = false\n")
+	writeFile(t, proj, "extendai-lab.toml", "[codegraph]\nenabled = false\n")
 	writeFile(t, filepath.Join(home, ".extendai-lab"), "config.json",
 		`{"apiKey":"sk-e2e","lang":"zh","mcpServers":{"fs":{"command":"npx","args":["-y","server-fs"]}}}`)
 	writeFile(t, filepath.Join(home, ".extendai-lab", "sessions"), "chat-1.events.jsonl",
@@ -594,7 +594,7 @@ func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
 	proj := robustTempDir(t)
-	writeFile(t, proj, "reasonix.toml", "[codegraph]\nenabled = false\n")
+	writeFile(t, proj, "extendai-lab.toml", "[codegraph]\nenabled = false\n")
 
 	legacyDir := config.SessionDir()
 	writeFile(t, legacyDir, "custom-root.events.jsonl",
@@ -686,7 +686,7 @@ func TestBuildMigratesLegacyEagerTierToBackground(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 
-	writeFile(t, dir, "reasonix.toml", `
+	writeFile(t, dir, "extendai-lab.toml", `
 default_model = "test-model"
 
 [codegraph]
@@ -720,7 +720,7 @@ tier = "eager"
 	if len(failures) != 1 || failures[0].Name != "legacy-eager" {
 		t.Fatalf("failures = %+v, want background startup failure for migrated legacy eager plugin", failures)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "reasonix.toml"))
+	raw, err := os.ReadFile(filepath.Join(dir, "extendai-lab.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -734,7 +734,7 @@ func TestBuildMigratesLegacyLazyTierToBackground(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 
-	writeFile(t, dir, "reasonix.toml", `
+	writeFile(t, dir, "extendai-lab.toml", `
 default_model = "test-model"
 
 [codegraph]
@@ -768,7 +768,7 @@ tier = "lazy"
 	if len(failures) != 1 || failures[0].Name != "legacy-lazy" {
 		t.Fatalf("failures = %+v, want background startup failure for migrated legacy lazy plugin", failures)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "reasonix.toml"))
+	raw, err := os.ReadFile(filepath.Join(dir, "extendai-lab.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -784,7 +784,7 @@ func TestBuildColdCodegraphStartsInBackground(t *testing.T) {
 	launcher := writeCodegraphHelper(t, dir)
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 
-	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+	writeFile(t, dir, "extendai-lab.toml", fmt.Sprintf(`
 default_model = "test-model"
 
 [codegraph]
@@ -857,7 +857,7 @@ func TestBuildMigratesLegacyEagerBeforeStatsDemotion(t *testing.T) {
 		}
 	}
 
-	writeFile(t, dir, "reasonix.toml", `
+	writeFile(t, dir, "extendai-lab.toml", `
 default_model = "test-model"
 
 [codegraph]

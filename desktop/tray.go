@@ -28,8 +28,8 @@ func (a *App) startTray() {
 
 	t.end = startDesktopTray(func() {
 		systray.SetIcon(trayIconBytes)
-		systray.SetTitle("Reasonix")
-		systray.SetTooltip("Reasonix")
+		systray.SetTitle("extendai-lab")
+		systray.SetTooltip("extendai-lab")
 		systray.SetOnTapped(func() { a.showFromTray() })
 		// Keep secondary/right-click on systray's native menu path.
 		systray.SetOnSecondaryTapped(nil)
@@ -110,15 +110,15 @@ func trayMenuLabels(locale string) trayLabels {
 	if locale == "zh" {
 		return trayLabels{
 			openTitle:   "打开",
-			openTooltip: "打开 Reasonix 窗口",
+			openTooltip: "打开 extendai-lab 窗口",
 			quitTitle:   "退出",
-			quitTooltip: "退出 Reasonix",
+			quitTooltip: "退出 extendai-lab",
 		}
 	}
 	return trayLabels{
 		openTitle:   "Open",
-		openTooltip: "Open the Reasonix window",
+		openTooltip: "Open the extendai-lab window",
 		quitTitle:   "Quit",
-		quitTooltip: "Quit Reasonix",
+		quitTooltip: "Quit extendai-lab",
 	}
 }
