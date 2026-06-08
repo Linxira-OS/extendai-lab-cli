@@ -1039,28 +1039,6 @@ export function Composer({
       )}
       {menuMode === "at" && <FileMenu items={atMatches} activeIndex={active} onPick={pickEntry} onHover={setActive} />}
       <div className="composer-toolbar">
-        <div className="composer-modebar" role="toolbar" aria-label={t("composer.modeTitle")} ref={modebarRef} data-mode={mode}>
-          {modeThumb && (
-            <span
-              className="composer-modebar__thumb"
-              aria-hidden="true"
-              style={{ transform: `translateX(${modeThumb.left}px)`, width: modeThumb.width }}
-            />
-          )}
-          {modeOptions.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className={`composer-modebar__item composer-modebar__item--${option.id}${mode === option.id ? " composer-modebar__item--active" : ""}`}
-              onClick={() => onSetMode(option.id)}
-              aria-pressed={mode === option.id}
-              disabled={disabled || running}
-            >
-              {option.icon}
-              <span>{option.label}</span>
-            </button>
-          ))}
-        </div>
         {runActivity && (
           <div className="composer-runstatus" role="status" aria-live="polite">
             <span className="composer-runstatus__dot" />
@@ -1226,6 +1204,28 @@ export function Composer({
             </div>
           )}
           <div className="composer-meta__params">
+            <div className="composer-modebar" role="toolbar" aria-label={t("composer.modeTitle")} ref={modebarRef} data-mode={mode}>
+              {modeThumb && (
+                <span
+                  className="composer-modebar__thumb"
+                  aria-hidden="true"
+                  style={{ transform: `translateX(${modeThumb.left}px)`, width: modeThumb.width }}
+                />
+              )}
+              {modeOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`composer-modebar__item composer-modebar__item--${option.id}${mode === option.id ? " composer-modebar__item--active" : ""}`}
+                  onClick={() => onSetMode(option.id)}
+                  aria-pressed={mode === option.id}
+                  disabled={disabled || running}
+                >
+                  {option.icon}
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
             <div className="composer-meta__control composer-meta__control--model">
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
             </div>
