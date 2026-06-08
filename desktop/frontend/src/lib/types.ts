@@ -521,6 +521,7 @@ export interface NetworkView {
 export interface AgentView {
   temperature: number;
   maxSteps: number;
+  plannerMaxSteps: number;
   systemPrompt: string;
 }
 

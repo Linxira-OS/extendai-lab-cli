@@ -72,9 +72,10 @@ type NetworkView struct {
 }
 
 type AgentView struct {
-	Temperature  float64 `json:"temperature"`
-	MaxSteps     int     `json:"maxSteps"`
-	SystemPrompt string  `json:"systemPrompt"`
+	Temperature     float64 `json:"temperature"`
+	MaxSteps        int     `json:"maxSteps"`
+	PlannerMaxSteps int     `json:"plannerMaxSteps"`
+	SystemPrompt    string  `json:"systemPrompt"`
 }
 
 // SettingsView is the whole Settings panel payload.
@@ -223,6 +224,7 @@ func (a *App) Settings() SettingsView {
 				Deny:  []string{},
 			},
 			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}},
+			Agent:             AgentView{PlannerMaxSteps: 12},
 			AutoPlan:          "off",
 			DesktopTheme:      "dark",
 			DesktopThemeStyle: "graphite",
@@ -264,7 +266,7 @@ func (a *App) Settings() SettingsView {
 				Password: cfg.Network.Proxy.Password,
 			},
 		},
-		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
+		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
 		DesktopLanguage:   cfg.DesktopLanguage(),
 		DesktopTheme:      cfg.DesktopTheme(),
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
@@ -1060,12 +1062,13 @@ func (a *App) MigrateDesktopPreferences(language, theme, style string) error {
 	})
 }
 
-// SetAgentParams updates sampling temperature, the optional max-steps guard, and
-// the base system prompt.
-func (a *App) SetAgentParams(temperature float64, maxSteps int, systemPrompt string) error {
+// SetAgentParams updates sampling temperature, optional step guards, and the
+// base system prompt.
+func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps int, systemPrompt string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Agent.Temperature = temperature
 		c.Agent.MaxSteps = maxSteps
+		c.Agent.PlannerMaxSteps = plannerMaxSteps
 		c.Agent.SystemPrompt = systemPrompt
 		return nil
 	})

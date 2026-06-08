@@ -185,7 +185,7 @@ export interface AppBindings {
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
-  SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string): Promise<void>;
+  SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh"): Promise<void>;
   // SetBypass toggles YOLO mode (auto-approve every tool call this session; deny
   // rules still apply). Runtime-only — not written to config.
@@ -565,7 +565,7 @@ function makeMockApp(): AppBindings {
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
-    agent: { temperature: 0.2, maxSteps: 0, systemPrompt: "You are Reasonix, a coding agent." },
+    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "You are Reasonix, a coding agent." },
     desktopLanguage: "",
     desktopTheme: "dark",
     desktopThemeStyle: "graphite",
@@ -1535,8 +1535,8 @@ function makeMockApp(): AppBindings {
             settings.desktopThemeStyle = style;
           }
         },
-    async SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string) {
-      settings.agent = { temperature, maxSteps, systemPrompt };
+    async SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string) {
+      settings.agent = { temperature, maxSteps, plannerMaxSteps, systemPrompt };
     },
     async SetTrayLocale(_locale: "en" | "zh") {},
     async SetBypass(on: boolean) {

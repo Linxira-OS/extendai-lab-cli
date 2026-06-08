@@ -178,6 +178,82 @@ func TestCoordinatorPlannerUsesReadOnlyResearchTools(t *testing.T) {
 	}
 }
 
+func TestCoordinatorPlannerMaxStepsUsesPlannerConfigKey(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"REASONIX.md"}`}},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Done."},
+		{Type: provider.ChunkDone},
+	}}
+
+	parentReg := tool.NewRegistry()
+	parentReg.Add(coordinatorTestTool{name: "read_file", readOnly: true, output: "keep reading"})
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, PlannerToolRegistry(parentReg), Options{
+		MaxSteps:    2,
+		MaxStepsKey: "agent.planner_max_steps",
+	}, executor, 0, event.Discard, nil)
+
+	err := coord.Run(context.Background(), "plan a change")
+	if err == nil {
+		t.Fatal("Run should pause when the planner reaches its configured step limit")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "planner: paused after 2 tool-call rounds (agent.planner_max_steps)") {
+		t.Fatalf("pause error = %q, want planner_max_steps message", msg)
+	}
+	if strings.Contains(msg, "agent.max_steps") {
+		t.Fatalf("planner pause should not point at agent.max_steps: %q", msg)
+	}
+	if got := len(planner.requests); got != 2 {
+		t.Fatalf("planner requests = %d, want exactly the configured 2 rounds", got)
+	}
+	if len(exec.requests) != 0 {
+		t.Fatal("executor should not run when planner pauses before producing a plan")
+	}
+}
+
+func TestCoordinatorPlannerMaxStepsZeroIsUnlimited(t *testing.T) {
+	planner := &mockProvider{name: "planner", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"a"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-2", Name: "read_file", Arguments: `{"path":"b"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkText, Text: "1. use both files"},
+			{Type: provider.ChunkDone},
+		},
+	}}
+	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Done."},
+		{Type: provider.ChunkDone},
+	}}
+
+	parentReg := tool.NewRegistry()
+	parentReg.Add(coordinatorTestTool{name: "read_file", readOnly: true, output: "ok"})
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, PlannerToolRegistry(parentReg), Options{
+		MaxSteps:    0,
+		MaxStepsKey: "agent.planner_max_steps",
+	}, executor, 0, event.Discard, nil)
+
+	if err := coord.Run(context.Background(), "plan a change"); err != nil {
+		t.Fatalf("Run with planner max steps 0 should not pause: %v", err)
+	}
+	if got := len(planner.requests); got != 3 {
+		t.Fatalf("planner requests = %d, want all 3 scripted planner turns", got)
+	}
+	if got := lastUser(exec.lastReq); !strings.Contains(got, "use both files") {
+		t.Fatalf("executor did not receive planner output: %q", got)
+	}
+}
+
 func toolSchemaNames(schemas []provider.ToolSchema) []string {
 	out := make([]string, 0, len(schemas))
 	for _, s := range schemas {

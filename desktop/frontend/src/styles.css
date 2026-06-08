@@ -6477,6 +6477,27 @@ a[href] {
   min-width: auto;
 }
 
+.step-limit-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  max-width: 640px;
+  min-width: 0;
+}
+
+.step-limit-control .set-seg {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.step-limit-control__custom {
+  width: 82px;
+  flex: 0 0 82px;
+  text-align: center;
+}
+
 .settings-page .settings-model-current {
   margin-top: 14px;
 }
@@ -6670,6 +6691,11 @@ a[href] {
   }
 
   .settings-inline-controls {
+    flex-wrap: wrap;
+  }
+
+  .step-limit-control {
+    justify-content: flex-start;
     flex-wrap: wrap;
   }
 
