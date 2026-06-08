@@ -300,8 +300,16 @@ export const en = {
   "approval.hideDetails": "Hide",
   "approval.deny": "Deny",
   "approval.allowOnce": "Allow once",
-  "approval.allowSession": "Allow for session",
-  "approval.allowPersistent": "Always allow (save)",
+  "approval.allowSession": "Allow tool for session",
+  "approval.allowPersistent": "Always allow tool (save)",
+  "approval.allowCommandSession": "Allow command for session",
+  "approval.allowCommandPersistent": "Always allow command (save)",
+  "approval.allowCommandPrefixSession": "Allow command prefix for session",
+  "approval.allowCommandPrefixPersistent": "Always allow command prefix (save)",
+  "approval.allowRuleSession": "Allow for session",
+  "approval.allowRulePersistent": "Always allow (save)",
+  "approval.allowEditsSession": "Allow edits for session",
+  "approval.allowFilePersistent": "Always allow this file (save)",
 
   // ask card
   "ask.title": "Need your decision",

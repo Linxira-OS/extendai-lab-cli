@@ -301,8 +301,16 @@ export const zh: Record<DictKey, string> = {
   "approval.hideDetails": "收起",
   "approval.deny": "拒绝",
   "approval.allowOnce": "允许一次",
-  "approval.allowSession": "本会话内允许",
-  "approval.allowPersistent": "总是允许（保存）",
+  "approval.allowSession": "本会话允许此工具",
+  "approval.allowPersistent": "总是允许此工具（保存）",
+  "approval.allowCommandSession": "本会话允许此命令",
+  "approval.allowCommandPersistent": "总是允许此命令（保存）",
+  "approval.allowCommandPrefixSession": "本会话允许命令前缀",
+  "approval.allowCommandPrefixPersistent": "总是允许命令前缀（保存）",
+  "approval.allowRuleSession": "本会话允许",
+  "approval.allowRulePersistent": "总是允许（保存）",
+  "approval.allowEditsSession": "本会话允许编辑",
+  "approval.allowFilePersistent": "总是允许此文件（保存）",
 
   // 提问卡片
   "ask.title": "需要你决定",

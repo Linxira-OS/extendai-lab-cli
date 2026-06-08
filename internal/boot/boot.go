@@ -680,8 +680,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		PluginCtx:     ctx,
 		WorkspaceRoot: root,
 		AutoPlan:      cfg.Agent.AutoPlan,
-		OnRemember: func(rule string) {
-			rememberPermissionRule(opts.WorkspaceRoot, rule)
+		OnRemember: func(rule string) control.RememberResult {
+			return rememberPermissionRule(root, rule)
 		},
 	}
 	if classifier != nil {
@@ -733,16 +733,27 @@ func migrateLegacySessionSources(sink event.Sink) {
 	}
 }
 
-func rememberPermissionRule(workspaceRoot, rule string) {
+func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 	path := rememberPermissionConfigPath(workspaceRoot)
 	edit := config.LoadForEdit(path)
+	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: path}
+	if coveredBy := coveredPermissionRule(edit.Permissions.Allow, result.Rule); coveredBy != "" {
+		result.CoveredBy = coveredBy
+		return result
+	}
+	edit.Permissions.Allow = pruneCoveredPermissionRules(edit.Permissions.Allow, result.Rule)
 	if err := edit.AddPermissionRule("allow", rule); err != nil {
 		slog.Warn("persist permission rule", "rule", rule, "err", err)
-		return
+		result.Err = err
+		return result
 	}
 	if err := edit.SaveTo(path); err != nil {
 		slog.Warn("save config after permission rule", "err", err)
+		result.Err = err
+		return result
 	}
+	result.Saved = true
+	return result
 }
 
 func rememberPermissionConfigPath(workspaceRoot string) string {
@@ -755,6 +766,26 @@ func rememberPermissionConfigPath(workspaceRoot string) string {
 		path = "reasonix.toml" // match Config.Save() fallback
 	}
 	return path
+}
+
+func coveredPermissionRule(rules []string, rule string) string {
+	for _, existing := range rules {
+		if permission.RuleCoversString(existing, rule) {
+			return strings.TrimSpace(existing)
+		}
+	}
+	return ""
+}
+
+func pruneCoveredPermissionRules(rules []string, rule string) []string {
+	out := rules[:0]
+	for _, existing := range rules {
+		if strings.TrimSpace(existing) == "" || permission.RuleCoversString(rule, existing) {
+			continue
+		}
+		out = append(out, existing)
+	}
+	return out
 }
 
 func firstNonEmpty(vals ...string) string {

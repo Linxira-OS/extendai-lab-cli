@@ -450,14 +450,14 @@ func TestRememberPermissionRuleUsesWorkspaceRoot(t *testing.T) {
 	t.Chdir(cwd)
 	writeFile(t, cwd, "reasonix.toml", `
 [permissions]
-allow = ["bash(cwd*)"]
+allow = ["Bash(cwd*)"]
 `)
 	writeFile(t, workspace, "reasonix.toml", `
 [permissions]
-allow = ["bash(workspace*)"]
+allow = ["Bash(workspace*)"]
 `)
 
-	const rule = "bash=go test ./..."
+	const rule = "Bash(go test ./...)"
 	rememberPermissionRule(workspace, rule)
 
 	cwdCfg := config.LoadForEdit(filepath.Join(cwd, "reasonix.toml"))
@@ -467,6 +467,36 @@ allow = ["bash(workspace*)"]
 	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
 	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
 		t.Fatalf("remembered rule missing from workspace config: %v", workspaceCfg.Permissions.Allow)
+	}
+}
+
+func TestRememberPermissionRuleCreatesWorkspaceConfigOverUserConfig(t *testing.T) {
+	home := robustTempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	workspace := robustTempDir(t)
+	userConfig := config.UserConfigPath()
+	writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), `
+[permissions]
+allow = ["Bash(user)"]
+`)
+
+	const rule = "Edit(src/app.go)"
+	res := rememberPermissionRule(workspace, rule)
+	if !res.Saved || res.Path != filepath.Join(workspace, "reasonix.toml") {
+		t.Fatalf("remember result = %+v, want saved to workspace config", res)
+	}
+
+	userCfg := config.LoadForEdit(userConfig)
+	if hasPermissionRule(userCfg.Permissions.Allow, rule) {
+		t.Fatalf("workspace rule was written to user config: %v", userCfg.Permissions.Allow)
+	}
+	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
+		t.Fatalf("workspace rule missing from project config: %v", workspaceCfg.Permissions.Allow)
 	}
 }
 
@@ -482,11 +512,14 @@ func TestRememberPermissionRuleEmptyRootUsesSourcePath(t *testing.T) {
 	userConfig := config.UserConfigPath()
 	writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), `
 [permissions]
-allow = ["bash(user*)"]
+allow = ["Bash(user*)"]
 `)
 
-	const rule = "bash=go env"
-	rememberPermissionRule("", rule)
+	const rule = "Bash(go env)"
+	res := rememberPermissionRule("", rule)
+	if !res.Saved || res.Path != userConfig {
+		t.Fatalf("remember result = %+v, want saved to user source config", res)
+	}
 
 	userCfg := config.LoadForEdit(userConfig)
 	if !hasPermissionRule(userCfg.Permissions.Allow, rule) {
@@ -494,6 +527,43 @@ allow = ["bash(user*)"]
 	}
 	if _, err := os.Stat(filepath.Join(cwd, "reasonix.toml")); !os.IsNotExist(err) {
 		t.Fatalf("empty root should not create cwd config when SourcePath exists, err=%v", err)
+	}
+}
+
+func TestRememberPermissionRuleSkipsRuleCoveredByExistingAllow(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `
+[permissions]
+allow = ["Bash(go test:*)"]
+`)
+
+	res := rememberPermissionRule(workspace, "Bash(go test ./...)")
+	if res.Saved || res.CoveredBy != "Bash(go test:*)" {
+		t.Fatalf("remember result = %+v, want already covered", res)
+	}
+	cfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	if len(cfg.Permissions.Allow) != 1 || cfg.Permissions.Allow[0] != "Bash(go test:*)" {
+		t.Fatalf("allow rules = %v, want only existing prefix", cfg.Permissions.Allow)
+	}
+}
+
+func TestRememberPermissionRulePrunesNarrowRulesWhenSavingBroaderRule(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `
+[permissions]
+allow = ["Bash(go test ./...)", "Bash(go build ./...)"]
+`)
+
+	res := rememberPermissionRule(workspace, "Bash(go test:*)")
+	if !res.Saved || res.CoveredBy != "" {
+		t.Fatalf("remember result = %+v, want saved broader rule", res)
+	}
+	cfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	if hasPermissionRule(cfg.Permissions.Allow, "Bash(go test ./...)") {
+		t.Fatalf("narrow go test rule should be pruned: %v", cfg.Permissions.Allow)
+	}
+	if !hasPermissionRule(cfg.Permissions.Allow, "Bash(go build ./...)") || !hasPermissionRule(cfg.Permissions.Allow, "Bash(go test:*)") {
+		t.Fatalf("allow rules = %v, want unrelated exact plus prefix", cfg.Permissions.Allow)
 	}
 }
 

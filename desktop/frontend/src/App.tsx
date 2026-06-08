@@ -1599,11 +1599,11 @@ export default function App() {
             {state.approval && (
               <ApprovalModal
                 approval={state.approval}
-                onAnswer={(allow, session, persist) => {
+                onAnswer={(allow, session, persist, scope) => {
                   // Approving an exit_plan_mode plan leaves plan mode; sync the
                   // tab-local indicator and persisted safe mode immediately.
                   if (state.approval!.tool === "exit_plan_mode" && allow) applyMode("normal");
-                  approve(state.approval!.id, allow, session, persist);
+                  approve(state.approval!.id, allow, session, persist, scope);
                 }}
                 onRevisePlan={(text) => {
                   setPendingPlanRevision(text);

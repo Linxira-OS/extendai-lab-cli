@@ -30,6 +30,7 @@ import (
 	"reasonix/internal/i18n"
 	"reasonix/internal/memory"
 	"reasonix/internal/outputstyle"
+	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
@@ -1828,38 +1829,57 @@ func flushableMarkdownPrefix(buf string) string {
 const planApprovalTool = "exit_plan_mode"
 
 // handleApprovalKey resolves a pending approval from a keystroke and re-arms the
-// listener. 1/y/Enter allows once, 2/a allows for the rest of the session,
-// 3/p writes an "always allow" rule to the config file, 4/n/Esc denies.
+// listener. 1/y/Enter allows once, 2/a allows for the rest of the session, and
+// n/Esc denies. Bash approvals with a safe prefix use 2/a for the prefix
+// session grant and 3/p for the persisted prefix. For standard approvals, 3/p
+// writes an "always allow" rule to the config file.
 // Ctrl-C cancels the whole turn via the run context. For a plan approval
 // (planApprovalTool), allowing also drops the local [plan] tag — the
 // controller turns plan mode off on its side.
 func (m chatTUI) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	answer := func(allow, session, persist bool) (tea.Model, tea.Cmd) {
+	answer := func(allow, session, persist bool, scope string) (tea.Model, tea.Cmd) {
 		if allow && m.pendingApproval.Tool == planApprovalTool {
 			m.planMode = false
 		}
-		m.ctrl.Approve(m.pendingApproval.ID, allow, session, persist)
+		m.ctrl.ApproveWithScope(m.pendingApproval.ID, allow, session, persist, scope)
 		m.pendingApproval = nil
 		return m, nil // the next ApprovalRequest / event arrives on eventCh
 	}
+	hasBashPrefix := m.pendingApproval.Tool == "bash" && permission.BashCommandPrefix(m.pendingApproval.Subject) != ""
 	switch msg.String() {
 	case "ctrl+c":
 		m.ctrl.Cancel() // cancels the run; the approver unblocks via ctx.Done()
-		return answer(false, false, false)
+		return answer(false, false, false, permission.ApprovalScopeExact)
 	case "enter":
-		return answer(true, false, false)
+		return answer(true, false, false, permission.ApprovalScopeExact)
 	case "esc":
-		return answer(false, false, false)
+		return answer(false, false, false, permission.ApprovalScopeExact)
 	}
 	switch strings.ToLower(msg.String()) {
 	case "y", "1":
-		return answer(true, false, false)
+		return answer(true, false, false, permission.ApprovalScopeExact)
 	case "a", "2":
-		return answer(true, true, false) // session grant
-	case "p", "3":
-		return answer(true, true, true) // persist to config
-	case "n", "4":
-		return answer(false, false, false)
+		if hasBashPrefix {
+			return answer(true, true, false, permission.ApprovalScopePrefix) // prefix session grant
+		}
+		return answer(true, true, false, permission.ApprovalScopeExact) // session grant
+	case "3":
+		if hasBashPrefix {
+			return answer(true, true, true, permission.ApprovalScopePrefix) // persist prefix to config
+		}
+		return answer(true, true, true, permission.ApprovalScopeExact) // persist to config
+	case "p":
+		if hasBashPrefix {
+			return answer(true, true, true, permission.ApprovalScopePrefix) // persist prefix to config
+		}
+		return answer(true, true, true, permission.ApprovalScopeExact) // persist to config
+	case "4":
+		if hasBashPrefix {
+			return answer(false, false, false, permission.ApprovalScopeExact)
+		}
+		return answer(false, false, false, permission.ApprovalScopeExact)
+	case "n", "5":
+		return answer(false, false, false, permission.ApprovalScopeExact)
 	}
 	return m, nil // ignore anything else while awaiting a decision
 }
@@ -2238,7 +2258,14 @@ func (m chatTUI) renderApprovalBanner() string {
 	if subj != "" {
 		subj = " " + truncateSubject(subj, w)
 	}
-	text := fmt.Sprintf(i18n.M.ToolApprovalPromptFmt, name, subj, detail)
+	exactSessionRule := permission.SessionGrantRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject, permission.ApprovalScopeExact)
+	exactPersistentRule := permission.RememberRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject, permission.ApprovalScopeExact)
+	choices := fmt.Sprintf(i18n.M.ToolApprovalChoices, exactSessionRule, exactPersistentRule)
+	if m.pendingApproval.Tool == "bash" && permission.BashCommandPrefix(m.pendingApproval.Subject) != "" {
+		prefixRule := permission.RememberRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject, permission.ApprovalScopePrefix)
+		choices = fmt.Sprintf(i18n.M.BashPrefixChoices, prefixRule, prefixRule)
+	}
+	text := fmt.Sprintf(i18n.M.ToolApprovalPromptFmt, name, subj, detail, choices)
 	return approvalBannerStyle.Width(w).Render("⏸ " + text)
 }
 
