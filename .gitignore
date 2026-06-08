@@ -51,6 +51,7 @@ node_modules/
 
 # Reference projects (local only, never commit)
 studying/
+openagent-labforge/
 
 # Internal docs (local only, never commit)
 DESIGN.md
