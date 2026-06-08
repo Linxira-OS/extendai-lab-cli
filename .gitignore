@@ -1,0 +1,74 @@
+# Build artifacts
+/bin/
+/dist/
+/stage/
+/npm/.stage/
+/extendai-lab
+/extendai-lab.exe
+
+# Website (Astro) build output
+/site/dist/
+/site/.astro/
+/site/_preview.png
+
+# Go test/build scratch
+*.test
+*.out
+*.coverprofile
+coverage.out
+cpu.prof
+mem.prof
+
+# Wails desktop artifacts
+/desktop/build/*
+!/desktop/build/appicon.png
+/desktop/desktop
+/desktop/frontend/dist/*
+!/desktop/frontend/dist/.gitkeep
+/desktop/frontend/wailsjs/
+/desktop/frontend/package.json.md5
+
+# Environment / local config (extendai-lab.example.toml is the shared template)
+.env
+.env.local
+*.local
+/extendai-lab.toml
+/desktop/.env
+/desktop/extendai-lab.toml
+
+# Node / frontend dependencies and caches
+node_modules/
+.pnpm-store/
+.npm/
+
+# Project-local ExtendAI Lab state; keep the checked-in review command.
+/.extendai-lab/*
+!/.extendai-lab/commands/
+!/.extendai-lab/commands/review.md
+
+# CodeGraph per-project index (rebuilt locally; never committed)
+.codegraph/
+
+# Reference projects (local only, never commit)
+studying/
+
+# Internal docs (local only, never commit)
+DESIGN.md
+REASONIX.md
+
+# OpenCode / ExtendAI Lab
+.opencode/
+.extendai/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Scratch / agent working dirs (never committed)
+/tmp/
+/.codex/
+
+# Local scripts
+/run-tui.ps1

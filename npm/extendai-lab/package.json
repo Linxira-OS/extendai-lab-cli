@@ -1,0 +1,39 @@
+{
+  "name": "extendai-lab",
+  "version": "0.0.0",
+  "description": "Cache-first DeepSeek coding agent for the terminal.",
+  "bin": {
+    "extendai-lab": "bin/extendai-lab.js"
+  },
+  "files": [
+    "bin/extendai-lab.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/Linxira-OS/extendai-lab-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Linxira-OS/extendai-lab-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Linxira-OS/extendai-lab-cli/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "ai",
+    "agent",
+    "cli",
+    "coding-assistant",
+    "tui"
+  ],
+  "optionalDependencies": {
+    "@extendai-lab/cli-darwin-arm64": "0.0.0",
+    "@extendai-lab/cli-darwin-x64": "0.0.0",
+    "@extendai-lab/cli-linux-arm64": "0.0.0",
+    "@extendai-lab/cli-linux-x64": "0.0.0",
+    "@extendai-lab/cli-win32-arm64": "0.0.0",
+    "@extendai-lab/cli-win32-x64": "0.0.0"
+  }
+}
