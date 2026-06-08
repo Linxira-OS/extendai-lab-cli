@@ -9913,15 +9913,15 @@ a[href] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 0 12px;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-elev);
   color: var(--fg-dim);
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
