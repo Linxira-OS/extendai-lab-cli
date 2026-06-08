@@ -7,13 +7,10 @@ import { useUpdater } from "../lib/useUpdater";
 import {
   THEME_STYLES,
   applyTheme,
-  defaultStyleForTheme,
-  getResolvedTheme,
   getTheme,
   getThemeStyle,
   normalizeThemePreference,
   normalizeThemeStyleForTheme,
-  themeForStyle,
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
@@ -140,19 +137,15 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
                       themeStyle={themeStyle}
                       textSize={textSize}
                       fontFamily={fontFamily}
-                      onTheme={(t) => {
-                        const nextStyle = themeForStyle(themeStyle) === getResolvedTheme(t) ? themeStyle : defaultStyleForTheme(t);
-                        applyTheme(t, nextStyle, { persist: false });
-                        setThemeState(t);
-                        setThemeStyleState(nextStyle);
-                        void apply(() => app.SetDesktopAppearance(t, nextStyle));
+                      onTheme={(nextTheme) => {
+                        applyTheme(nextTheme, themeStyle, { persist: false });
+                        setThemeState(nextTheme);
+                        void apply(() => app.SetDesktopAppearance(nextTheme, themeStyle));
                       }}
                       onThemeStyle={(style) => {
-                        const nextTheme = themeForStyle(style);
-                        applyTheme(nextTheme, style, { persist: false });
-                        setThemeState(nextTheme);
+                        applyTheme(theme, style, { persist: false });
                         setThemeStyleState(style);
-                        void apply(() => app.SetDesktopAppearance(nextTheme, style));
+                        void apply(() => app.SetDesktopAppearance(theme, style));
                       }}
                       onTextSize={(size) => {
                         applyTextSize(size);
@@ -2915,6 +2908,16 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
   );
 }
 
+// Direction metadata for the appearance theme-style cards. The two surface
+// swatches + accent are read from CSS variables at render time so they always
+// reflect the live token values for the currently-resolved light/dark mode.
+const THEME_STYLE_META: Record<ThemeStyle, { name: string; zh: DictKey; note: DictKey; desc: DictKey }> = {
+  slate: { name: "Slate", zh: "settings.style.slate.zh", note: "settings.style.slate.note", desc: "settings.style.slate.desc" },
+  carbon: { name: "Carbon", zh: "settings.style.carbon.zh", note: "settings.style.carbon.note", desc: "settings.style.carbon.desc" },
+  nocturne: { name: "Nocturne", zh: "settings.style.nocturne.zh", note: "settings.style.nocturne.note", desc: "settings.style.nocturne.desc" },
+  amber: { name: "Amber", zh: "settings.style.amber.zh", note: "settings.style.amber.note", desc: "settings.style.amber.desc" },
+};
+
 function AppearanceSection({
   theme,
   themeStyle,
@@ -2952,17 +2955,37 @@ function AppearanceSection({
         </div>
       </SettingsField>
       <SettingsField label={t("settings.themeStyle")} stacked>
-        <div className="theme-style-grid">
-          {THEME_STYLES.map((opt) => (
-            <button
-              key={opt}
-              className={`theme-style-btn${themeStyle === opt ? " theme-style-btn--on" : ""}`}
-              onClick={() => onThemeStyle(opt)}
-            >
-              <span className="theme-style-swatch" data-theme-style-swatch={opt} />
-              <span>{opt}</span>
-            </button>
-          ))}
+        <div className="theme-card-grid">
+          {THEME_STYLES.map((opt) => {
+            const meta = THEME_STYLE_META[opt];
+            const selected = themeStyle === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={`theme-card${selected ? " theme-card--on" : ""}`}
+                onClick={() => onThemeStyle(opt)}
+              >
+                <span className="theme-card__head">
+                  <span className="theme-card__name">
+                    {meta.name} <span className="theme-card__zh">{t(meta.zh)}</span>
+                  </span>
+                  <span className="theme-card__tag">{t(meta.note)}</span>
+                </span>
+                <span className="theme-card__swatches" data-theme-style-card={opt}>
+                  <span className="theme-card__swatch theme-card__swatch--bg" />
+                  <span className="theme-card__swatch theme-card__swatch--surface" />
+                  <span className="theme-card__swatch theme-card__swatch--accent" />
+                </span>
+                <span className="theme-card__desc">{t(meta.desc)}</span>
+                <span className="theme-card__check" aria-hidden="true">
+                  <Check size={13} strokeWidth={3} />
+                </span>
+              </button>
+            );
+          })}
         </div>
       </SettingsField>
       <SettingsField label={t("settings.textSize")}>

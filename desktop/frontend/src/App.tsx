@@ -50,7 +50,6 @@ import {
   normalizeThemePreference,
   normalizeThemeStyleForTheme,
   readLegacyThemePreference,
-  themeForStyle,
   type Theme,
 } from "./lib/theme";
 import { useWindowStatePersistence } from "./lib/windowState";
@@ -774,10 +773,10 @@ export default function App() {
           return;
         }
         if (isThemeStyle(arg)) {
-          const next = themeForStyle(arg);
-          await app.SetDesktopAppearance(next, arg);
-          applyTheme(next, arg);
-          notice(t("settings.themeChanged", { theme: next, style: arg }));
+          const cur = getTheme();
+          await app.SetDesktopAppearance(cur, arg);
+          applyTheme(cur, arg);
+          notice(t("settings.themeChanged", { theme: cur, style: arg }));
           return;
         }
         notice(t("settings.themeUnknown", { name: arg }), "warn");
