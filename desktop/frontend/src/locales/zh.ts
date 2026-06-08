@@ -224,6 +224,7 @@ export const zh: Record<DictKey, string> = {
   "welcome.ex1": "讲讲这个代码库的架构",
   "welcome.ex2": "总结最近的 git 改动",
   "welcome.ex3": "智能体的运行主循环在哪，它做了什么？",
+  "welcome.ex4": "找出并修复这个项目里的一个 bug",
 
   // 输入框
   "composer.placeholder": "给 Reasonix 发消息…  ( / 命令 · @ 文件 )",

@@ -223,6 +223,7 @@ export const en = {
   "welcome.ex1": "Explain this codebase's architecture",
   "welcome.ex2": "Summarize the recent git changes",
   "welcome.ex3": "Where is the agent run loop, and what does it do?",
+  "welcome.ex4": "Find and fix a bug in this project",
 
   // composer
   "composer.placeholder": "Message Reasonix…  ( / commands · @ files )",

@@ -7,7 +7,7 @@ import { useT } from "../lib/i18n";
 
 export function Welcome({ onPrompt }: { onPrompt: (text: string) => void }) {
   const t = useT();
-  const examples = [t("welcome.ex1"), t("welcome.ex2"), t("welcome.ex3")];
+  const examples = [t("welcome.ex1"), t("welcome.ex2"), t("welcome.ex3"), t("welcome.ex4")];
   return (
     <div className="welcome">
       <img src={logoWordmark} className="welcome__logo" alt="Reasonix" />

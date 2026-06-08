@@ -1393,12 +1393,12 @@ a[href] {
   text-align: center;
 }
 .welcome__examples {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin-top: 26px;
   width: 100%;
-  max-width: 380px;
+  max-width: 460px;
 }
 .welcome__ex {
   text-align: left;
