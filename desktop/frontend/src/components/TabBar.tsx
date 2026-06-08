@@ -2,7 +2,7 @@
 // open project/global topic, so switching tabs switches the active conversation.
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { FileText, Plus, X } from "lucide-react";
+import { FileText, Plus, Search, X } from "lucide-react";
 import type { TabMeta } from "../lib/types";
 import { projectColorValue } from "../lib/projectColors";
 import { useT } from "../lib/i18n";
@@ -17,6 +17,7 @@ interface TabBarProps {
   onTabsClose: (tabIds: string[], nextActiveTabId?: string) => void;
   onTabsReorder: (tabIds: string[]) => void;
   onNewTab: () => void;
+  onOpenPalette?: () => void;
   revealActiveSignal?: number;
 }
 
@@ -50,7 +51,7 @@ function projectAccentStyle(color?: string): CSSProperties | undefined {
   return { "--project-accent": value } as CSSProperties;
 }
 
-export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose, onTabsReorder, onNewTab, revealActiveSignal = 0 }: TabBarProps) {
+export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose, onTabsReorder, onNewTab, onOpenPalette, revealActiveSignal = 0 }: TabBarProps) {
   const t = useT();
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; side: DropSide } | null>(null);
@@ -255,6 +256,18 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
           <Plus size={13} />
         </button>
       </Tooltip>
+      {onOpenPalette && (
+        <button
+          className="tabbar__command"
+          type="button"
+          onClick={onOpenPalette}
+          aria-label={t("palette.placeholder")}
+        >
+          <Search size={13} className="tabbar__command-icon" />
+          <span className="tabbar__command-text">{t("palette.placeholder")}</span>
+          <kbd className="tabbar__command-kbd">⌘K</kbd>
+        </button>
+      )}
       <ContextMenu
         open={Boolean(menuTabId)}
         point={menuPoint}

@@ -1432,6 +1432,7 @@ export default function App() {
                 onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
                 onTabsReorder={(ids) => void handleTabsReorder(ids)}
                 onNewTab={() => void handleNewTab()}
+                onOpenPalette={() => void openPalette()}
               />
             </div>
           ) : (
@@ -1552,6 +1553,7 @@ export default function App() {
                 onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
                 onTabsReorder={(ids) => void handleTabsReorder(ids)}
                 onNewTab={() => void handleNewTab()}
+                onOpenPalette={() => void openPalette()}
               />
             </header>
           )}

@@ -10298,6 +10298,54 @@ a[href] {
   color: var(--fg);
 }
 
+/* L1: command-search bar — opens the ⌘K palette. Sits after the new-tab
+   button and fills the remaining strip width like the prototype. */
+.tabbar__command {
+  flex: 1 1 auto;
+  min-width: 90px;
+  max-width: 360px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 4px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.tabbar__command:hover {
+  border-color: var(--border-strong, var(--border));
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+}
+.tabbar__command-icon {
+  flex: none;
+  opacity: 0.8;
+}
+.tabbar__command-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.tabbar__command-kbd {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
 .project-tree {
   --project-tree-action-column: 36px;
   --project-tree-edge-gap: 6px;
