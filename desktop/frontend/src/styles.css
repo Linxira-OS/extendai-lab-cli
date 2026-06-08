@@ -1630,6 +1630,7 @@ a[href] {
   --process-tone: var(--fg-dim);
   --process-tone-soft: color-mix(in srgb, var(--fg-dim) 12%, transparent);
   box-sizing: border-box;
+  position: relative;
   width: 100%;
   margin: 6px auto;
   border: 1px solid var(--border-soft);
@@ -1637,6 +1638,27 @@ a[href] {
   background: var(--bg-elev);
   overflow: hidden;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+/* T1: a tone-colored sweep bar along the bottom while the card is running
+   (running cards render a .process-card__spin status icon). */
+@media (prefers-reduced-motion: no-preference) {
+  .process-card:has(.process-card__spin)::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--process-tone), transparent);
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    animation: process-sweep 1.2s ease-in-out infinite;
+    pointer-events: none;
+  }
+}
+@keyframes process-sweep {
+  from { background-position: -40% 0; }
+  to { background-position: 140% 0; }
 }
 .process-card[data-tone="success"] {
   --process-tone: var(--ok);
@@ -8673,6 +8695,7 @@ a[href] {
 
 .composer-modebar {
   --wails-draggable: no-drag;
+  position: relative;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -8685,6 +8708,32 @@ a[href] {
   background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent);
 }
+/* T2: sliding thumb, colored per active mode. */
+.composer-modebar__thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border-radius: 7px;
+  border: 1px solid var(--mode-auto-border);
+  background: var(--mode-auto-bg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 20%, transparent),
+    0 1px 3px color-mix(in srgb, #000 36%, transparent);
+  transition: transform 0.2s cubic-bezier(0.34, 1.4, 0.5, 1), width 0.2s cubic-bezier(0.34, 1.4, 0.5, 1), background 0.16s ease, border-color 0.16s ease;
+  pointer-events: none;
+}
+.composer-modebar[data-mode="plan"] .composer-modebar__thumb {
+  background: var(--mode-plan-bg);
+  border-color: var(--mode-plan-border);
+}
+.composer-modebar[data-mode="yolo"] .composer-modebar__thumb {
+  background: var(--mode-yolo-bg);
+  border-color: var(--mode-yolo-border);
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-modebar__thumb { transition: background 0.16s ease, border-color 0.16s ease; }
+}
 .composer-wrap--decision-pending .composer-modebar {
   opacity: 0.46;
   filter: saturate(0.55);
@@ -8694,6 +8743,7 @@ a[href] {
   --mode-active-bg: var(--mode-auto-bg);
   --mode-active-border: var(--mode-auto-border);
   --mode-active-fg: var(--mode-auto-fg);
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8736,18 +8786,15 @@ a[href] {
   --mode-active-fg: var(--mode-yolo-fg);
 }
 .composer-modebar__item--active {
-  background: var(--mode-active-bg);
-  border-color: var(--mode-active-border);
+  background: transparent;
+  border-color: transparent;
   color: var(--mode-active-fg);
   font-weight: 620;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 20%, transparent),
-    0 1px 3px color-mix(in srgb, #000 36%, transparent);
 }
 .composer-modebar__item--active:hover:not(:disabled),
 .composer-modebar__item--active:focus-visible {
-  background: var(--mode-active-bg);
-  border-color: var(--mode-active-border);
+  background: transparent;
+  border-color: transparent;
   color: var(--mode-active-fg);
 }
 .composer-modebar__item--active:focus-visible {
@@ -11840,6 +11887,10 @@ a[href] {
 .composer-modebar {
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-elev-2) 72%, transparent);
+}
+
+.composer-modebar__thumb {
+  border-radius: 6px;
 }
 
 .composer-modebar__item {

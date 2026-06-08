@@ -922,6 +922,19 @@ export function Composer({
     { id: "plan", label: "plan", icon: <List size={13} /> },
     { id: "yolo", label: "yolo", icon: <AlertTriangle size={13} /> },
   ];
+  // T2: a sliding thumb tracks the active mode. Measured from the live button
+  // so it stays aligned with the variable-width labels.
+  const modebarRef = useRef<HTMLDivElement>(null);
+  const [modeThumb, setModeThumb] = useState<{ left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const bar = modebarRef.current;
+    const active = bar?.querySelector<HTMLElement>(".composer-modebar__item--active");
+    if (!active) {
+      setModeThumb(null);
+      return;
+    }
+    setModeThumb({ left: active.offsetLeft, width: active.offsetWidth });
+  }, [mode, disabled, running]);
   const runActivity = retry
     ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
     : running && turnStartAt
@@ -1026,7 +1039,14 @@ export function Composer({
       )}
       {menuMode === "at" && <FileMenu items={atMatches} activeIndex={active} onPick={pickEntry} onHover={setActive} />}
       <div className="composer-toolbar">
-        <div className="composer-modebar" role="toolbar" aria-label={t("composer.modeTitle")}>
+        <div className="composer-modebar" role="toolbar" aria-label={t("composer.modeTitle")} ref={modebarRef} data-mode={mode}>
+          {modeThumb && (
+            <span
+              className="composer-modebar__thumb"
+              aria-hidden="true"
+              style={{ transform: `translateX(${modeThumb.left}px)`, width: modeThumb.width }}
+            />
+          )}
           {modeOptions.map((option) => (
             <button
               key={option.id}
