@@ -32,6 +32,12 @@ function mustNotMatch(rel, source, pattern, reason) {
   }
 }
 
+function mustMatch(rel, source, pattern, reason) {
+  if (!pattern.test(source)) {
+    fail(`${rel}: missing pattern ${pattern} (${reason})`);
+  }
+}
+
 const anchoredPopover = read("src/components/AnchoredPopover.tsx");
 mustNotContain(
   "src/components/AnchoredPopover.tsx",
@@ -73,6 +79,7 @@ mustContain(
 );
 
 const composer = read("src/components/Composer.tsx");
+const styles = read("src/styles.css");
 mustContain(
   "src/components/Composer.tsx",
   composer,
@@ -135,6 +142,12 @@ mustNotContain(
   "composer-access-trigger",
   "tool approval must not regress to a single dropdown trigger",
 );
+mustMatch(
+  "src/styles.css",
+  styles,
+  /\.sidebar__new\s*\{[\s\S]{0,420}height:\s*52px[\s\S]{0,420}border-radius:\s*12px/,
+  "sidebar new-session button should keep the larger CTA layout",
+);
 
 const projectTree = read("src/components/ProjectTree.tsx");
 mustContain(
@@ -186,7 +199,6 @@ mustContain(
   "collapse-all must target every expandable project folder key",
 );
 
-const styles = read("src/styles.css");
 mustNotContain(
   "src/styles.css",
   styles,
