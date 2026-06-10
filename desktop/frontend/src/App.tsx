@@ -1283,10 +1283,8 @@ export default function App() {
         nextMaximized = false;
         setWorkspacePanelMaximized(false);
       } else {
-        // When user explicitly opens the panel, we do NOT force maximize.
-        // If there's not enough room, the panel will open in floating mode
-        // over the chat area, preserving the chat area's minimum width
-        // and keeping the panel's close button accessible.
+        // Keep file/change views docked; the rendered dock width is clamped to
+        // the viewport so opening it reflows instead of forcing maximize.
         nextMaximized = false;
         setWorkspacePanelMaximized(false);
       }
