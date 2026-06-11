@@ -11436,6 +11436,45 @@ a[href] {
   --wails-draggable: no-drag;
 }
 
+.app--darwin .app-chrome--tabs .app-chrome__drag-rail {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: calc(var(--chrome-left-toggle-offset) + var(--chrome-toggle-size) + 12px);
+  right: calc(var(--chrome-right-toggle-offset) + var(--chrome-toggle-size) + 12px);
+  z-index: var(--z-local-handle);
+  height: 10px;
+  --wails-draggable: drag;
+}
+
+.app--darwin .app-chrome--tabs .app-chrome__drag-rail::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: calc(100% - 24px);
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-faint) 40%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 76%, transparent);
+  opacity: 0;
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.app--darwin .app-chrome--tabs .app-chrome__drag-rail:hover::before {
+  opacity: 0.72;
+}
+
+.app--darwin .app-chrome--tabs .app-chrome__drag-rail:active::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 68%, transparent);
+  opacity: 0.95;
+}
+
 .app--darwin .app-chrome--tabs .app-chrome__panel-toggle {
   top: 7px;
   height: 30px;
@@ -12471,6 +12510,10 @@ a[href] {
 .tabbar__spacer {
   flex: 1 1 auto;
   min-width: 12px;
+}
+
+.app-chrome__drag-rail {
+  display: none;
 }
 
 .tabbar__tab-close {
