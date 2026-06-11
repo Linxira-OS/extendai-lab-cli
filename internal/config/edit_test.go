@@ -522,7 +522,7 @@ func TestSkillEnabledMutator(t *testing.T) {
 func TestPluginMutators(t *testing.T) {
 	c := Default()
 
-	if err := c.UpsertPlugin(PluginEntry{Name: "ex", Command: "reasonix-plugin-example"}); err != nil {
+	if err := c.UpsertPlugin(PluginEntry{Name: "ex", Command: "extendai-lab-plugin-example"}); err != nil {
 		t.Fatalf("add stdio: %v", err)
 	}
 	if err := c.UpsertPlugin(PluginEntry{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com"}); err != nil {
@@ -589,7 +589,7 @@ func TestCodegraphDefaultEnabledForUpgrades(t *testing.T) {
 
 func TestLoadForEditPreservesCodegraphWithoutSection(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "reasonix.toml")
+	path := filepath.Join(dir, "extendai-lab.toml")
 	if err := os.WriteFile(path, []byte("default_model = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -709,7 +709,7 @@ func TestSaveToRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path := filepath.Join(t.TempDir(), "nested", "reasonix.toml")
+	path := filepath.Join(t.TempDir(), "nested", "extendai-lab.toml")
 	if err := c.SaveTo(path); err != nil {
 		t.Fatalf("SaveTo: %v", err)
 	}
@@ -763,7 +763,7 @@ func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
 		t.Fatalf("user config should include desktop preferences:\n%s", userBody)
 	}
 
-	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	projectPath := filepath.Join(t.TempDir(), "extendai-lab.toml")
 	if err := c.SaveTo(projectPath); err != nil {
 		t.Fatalf("SaveTo project config: %v", err)
 	}

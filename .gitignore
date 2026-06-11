@@ -3,8 +3,8 @@
 /dist/
 /stage/
 /npm/.stage/
-/reasonix
-/reasonix.exe
+/extendai-lab
+/extendai-lab.exe
 
 # Website (Astro) build output
 /site/dist/
@@ -28,26 +28,38 @@ mem.prof
 /desktop/frontend/wailsjs/
 /desktop/frontend/package.json.md5
 
-# Environment / local config (reasonix.example.toml is the shared template)
+# Environment / local config (extendai-lab.example.toml is the shared template)
 .env
 .env.local
 *.local
-/reasonix.toml
+/extendai-lab.toml
 /desktop/.env
-/desktop/reasonix.toml
+/desktop/extendai-lab.toml
 
 # Node / frontend dependencies and caches
 node_modules/
 .pnpm-store/
 .npm/
 
-# Project-local Reasonix state; keep the checked-in review command.
-/.reasonix/*
-!/.reasonix/commands/
-!/.reasonix/commands/review.md
+# Project-local ExtendAI Lab state; keep the checked-in review command.
+/.extendai-lab/*
+!/.extendai-lab/commands/
+!/.extendai-lab/commands/review.md
 
 # CodeGraph per-project index (rebuilt locally; never committed)
 .codegraph/
+
+# Reference projects (local only, never commit)
+studying/
+openagent-labforge/
+
+# Internal docs (local only, never commit)
+DESIGN.md
+REASONIX.md
+
+# OpenCode / ExtendAI Lab
+.opencode/
+.extendai/
 
 # Editor / OS
 .DS_Store
@@ -57,3 +69,6 @@ Thumbs.db
 /site/public/av/
 
 benchmarks/context-maintenance-e2e/run/
+
+# Local scripts
+/run-tui.ps1

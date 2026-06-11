@@ -13,7 +13,7 @@ import (
 // crash_app.go is the crash/feedback reporting surface. Reports are sent only on
 // an explicit user click in the frontend crash overlay — never automatically.
 
-var crashEndpoint = "https://crash.reasonix.io/v1/report"
+var crashEndpoint = "https://crash.extendai-lab.io/v1/report"
 
 const maxCrashDetailBytes = 16 << 10
 

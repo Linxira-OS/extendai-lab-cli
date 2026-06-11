@@ -44,7 +44,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 			Server:   "127.0.0.1",
 			Port:     7890,
 			Username: "user",
-			Password: "${REASONIX_PROXY_PASSWORD}",
+			Password: "${extendai-lab_PROXY_PASSWORD}",
 		},
 	}
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}
@@ -60,13 +60,13 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		Enabled:       true,
 		Status:        "connected",
 		Model:         "deepseek-pro",
-		WorkspaceRoot: "/tmp/reasonix-bot",
+		WorkspaceRoot: "/tmp/extendai-lab-bot",
 		Credential:    BotConnectionCredential{AppID: "cli_lark", AppSecretEnv: "LARK_BOT_APP_SECRET"},
 		SessionMappings: []BotConnectionSessionMapping{{
 			RemoteID:      "ou_123",
 			SessionID:     "topic:topic_bot",
 			Scope:         "project",
-			WorkspaceRoot: "/tmp/reasonix-bot",
+			WorkspaceRoot: "/tmp/extendai-lab-bot",
 			UpdatedAt:     "2026-06-11T00:00:00Z",
 		}},
 	}}
@@ -84,7 +84,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		},
 	}
 	orig.Plugins = []PluginEntry{
-		{Name: "example", Command: "reasonix-plugin-example"},
+		{Name: "example", Command: "extendai-lab-plugin-example"},
 		{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", Headers: map[string]string{"Authorization": "Bearer x"}, AutoStart: boolPtr(false), Tier: "background"},
 	}
 	mm, _ := orig.Provider("mimo-pro")
@@ -142,10 +142,10 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.PlannerMaxSteps != orig.Agent.PlannerMaxSteps {
 		t.Errorf("planner_max_steps = %d, want %d", got.Agent.PlannerMaxSteps, orig.Agent.PlannerMaxSteps)
 	}
-	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].Model != "deepseek-pro" || got.Bot.Connections[0].WorkspaceRoot != "/tmp/reasonix-bot" {
+	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].Model != "deepseek-pro" || got.Bot.Connections[0].WorkspaceRoot != "/tmp/extendai-lab-bot" {
 		t.Errorf("bot connection not preserved: %+v", got.Bot.Connections)
 	}
-	if len(got.Bot.Connections[0].SessionMappings) != 1 || got.Bot.Connections[0].SessionMappings[0].Scope != "project" || got.Bot.Connections[0].SessionMappings[0].WorkspaceRoot != "/tmp/reasonix-bot" {
+	if len(got.Bot.Connections[0].SessionMappings) != 1 || got.Bot.Connections[0].SessionMappings[0].Scope != "project" || got.Bot.Connections[0].SessionMappings[0].WorkspaceRoot != "/tmp/extendai-lab-bot" {
 		t.Errorf("bot session mapping scope not preserved: %+v", got.Bot.Connections[0].SessionMappings)
 	}
 	if got.Agent.Temperature != orig.Agent.Temperature {

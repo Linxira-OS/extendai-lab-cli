@@ -60,9 +60,9 @@ func TestClassifyRef(t *testing.T) {
 	files := map[string]bool{
 		"src/main.go": true,
 		"README.md":   true,
-		".reasonix/attachments/clipboard-20260601-010203.000000.png": true,
-		".reasonix/attachments/clipboard-20260601-010203.000000.yml": true,
-		".reasonix/attachments/clipboard-20260601-010203.000000.zip": true,
+		".extendai-lab/attachments/clipboard-20260601-010203.000000.png": true,
+		".extendai-lab/attachments/clipboard-20260601-010203.000000.yml": true,
+		".extendai-lab/attachments/clipboard-20260601-010203.000000.zip": true,
 	}
 	exists := func(p string) bool { return files[p] }
 
@@ -74,9 +74,9 @@ func TestClassifyRef(t *testing.T) {
 		{"docs:doc://style", true, refResource}, // known server + uri
 		{"src/main.go", true, refFile},          // existing file
 		{"README.md", true, refFile},            // existing file
-		{".reasonix/attachments/clipboard-20260601-010203.000000.png", true, refImage},
-		{".reasonix/attachments/clipboard-20260601-010203.000000.yml", true, refFile},
-		{".reasonix/attachments/clipboard-20260601-010203.000000.zip", true, refFile},
+		{".extendai-lab/attachments/clipboard-20260601-010203.000000.png", true, refImage},
+		{".extendai-lab/attachments/clipboard-20260601-010203.000000.yml", true, refFile},
+		{".extendai-lab/attachments/clipboard-20260601-010203.000000.zip", true, refFile},
 		{"ghost:issue://1", false, 0}, // unknown server, no such file
 		{"missing.go", false, 0},      // nonexistent path → not a ref
 		{"docs:", false, 0},           // empty uri → not a resource, no file
@@ -95,14 +95,14 @@ func TestClassifyRef(t *testing.T) {
 
 func TestResolveRefsAttachmentKinds(t *testing.T) {
 	temp := t.TempDir()
-	attachmentsDir := filepath.Join(temp, ".reasonix", "attachments")
+	attachmentsDir := filepath.Join(temp, ".extendai-lab", "attachments")
 	if err := os.MkdirAll(attachmentsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ymlRef := filepath.ToSlash(".reasonix/attachments/config.yml")
-	zipRef := filepath.ToSlash(".reasonix/attachments/archive.zip")
-	pngRef := filepath.ToSlash(".reasonix/attachments/shot.png")
-	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(ymlRef)), []byte("name: reasonix\n"), 0o644); err != nil {
+	ymlRef := filepath.ToSlash(".extendai-lab/attachments/config.yml")
+	zipRef := filepath.ToSlash(".extendai-lab/attachments/archive.zip")
+	pngRef := filepath.ToSlash(".extendai-lab/attachments/shot.png")
+	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(ymlRef)), []byte("name: extendai-lab\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(zipRef)), []byte{'P', 'K', 0x03, 0x04, 0x00}, 0o644); err != nil {
@@ -130,7 +130,7 @@ func TestResolveRefsAttachmentKinds(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
 	}
-	if !strings.Contains(block, `<file path="`+ymlRef+`">`) || !strings.Contains(block, "name: reasonix") {
+	if !strings.Contains(block, `<file path="`+ymlRef+`">`) || !strings.Contains(block, "name: extendai-lab") {
 		t.Fatalf("expected yml attachment to resolve as file content, got: %s", block)
 	}
 	if !strings.Contains(block, `<file path="`+zipRef+`">`) || !strings.Contains(block, "[binary file "+zipRef) {
