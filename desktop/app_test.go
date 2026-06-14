@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -221,7 +222,7 @@ func TestSettingsUsesUserDesktopPreferencesNotProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 [desktop]
 language = "zh"
 theme = "light"
@@ -261,7 +262,7 @@ func TestSettingsSeedsMissingUserConfigFromLegacyProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 default_model = "legacy-provider/legacy-model"
 
 [desktop]
@@ -1155,6 +1156,98 @@ func TestDeleteSessionRejectsInactiveOpenTab(t *testing.T) {
 	}
 }
 
+func TestDesktopSessionAPIsUseControllerSessionDir(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dirA := filepath.Join(t.TempDir(), "workspace-a-sessions")
+	dirB := filepath.Join(t.TempDir(), "workspace-b-sessions")
+	if err := os.MkdirAll(dirA, 0o755); err != nil {
+		t.Fatalf("mkdir dirA: %v", err)
+	}
+	if err := os.MkdirAll(dirB, 0o755); err != nil {
+		t.Fatalf("mkdir dirB: %v", err)
+	}
+	pathA := filepath.Join(dirA, "a.jsonl")
+	pathB := filepath.Join(dirB, "b.jsonl")
+	if err := os.WriteFile(pathA, []byte(`{"role":"user","content":"workspace A"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write pathA: %v", err)
+	}
+	if err := os.WriteFile(pathB, []byte(`{"role":"user","content":"workspace B"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write pathB: %v", err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{SessionDir: dirA, SessionPath: pathA, Label: "test"}), "")
+	defer app.activeCtrl().Close()
+
+	sessions := app.ListSessions()
+	if len(sessions) != 1 || sessions[0].Path != pathA || sessions[0].Preview != "workspace A" {
+		t.Fatalf("ListSessions should read the active controller session dir only, got %+v", sessions)
+	}
+	if err := app.RenameSession(pathA, "A title"); err != nil {
+		t.Fatalf("RenameSession in active session dir: %v", err)
+	}
+	if titles := loadSessionTitles(dirA); titles["a.jsonl"] != "A title" {
+		t.Fatalf("title should be written beside the active session, got %+v", titles)
+	}
+	if titles := loadSessionTitles(dirB); len(titles) != 0 {
+		t.Fatalf("inactive workspace title sidecar should remain untouched, got %+v", titles)
+	}
+}
+
+func TestResumeSessionRejectsPathOutsideControllerSessionDir(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	activePath := filepath.Join(dirA, "active.jsonl")
+	outsidePath := filepath.Join(dirB, "outside.jsonl")
+	for _, path := range []string{activePath, outsidePath} {
+		if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{SessionDir: dirA, SessionPath: activePath, Label: "test"}), "")
+	defer app.activeCtrl().Close()
+
+	if _, err := app.ResumeSession(outsidePath); err == nil {
+		t.Fatal("ResumeSession should reject a transcript outside the active session dir")
+	}
+	if _, err := app.PreviewSession(outsidePath); err == nil {
+		t.Fatal("PreviewSession should reject a transcript outside the active session dir")
+	}
+}
+
+func BenchmarkDesktopListSessionsScoped(b *testing.B) {
+	dirA := filepath.Join(b.TempDir(), "workspace-a-sessions")
+	dirB := filepath.Join(b.TempDir(), "workspace-b-sessions")
+	for _, dir := range []string{dirA, dirB} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			b.Fatalf("mkdir %s: %v", dir, err)
+		}
+		for i := 0; i < 120; i++ {
+			path := filepath.Join(dir, fmt.Sprintf("session-%03d.jsonl", i))
+			body := fmt.Sprintf(`{"role":"user","content":"session %03d"}`+"\n", i)
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				b.Fatalf("write session: %v", err)
+			}
+		}
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{SessionDir: dirA, SessionPath: filepath.Join(dirA, "session-000.jsonl"), Label: "test"}), "")
+	defer app.activeCtrl().Close()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sessions := app.ListSessions()
+		if len(sessions) != 120 {
+			b.Fatalf("ListSessions len = %d, want 120", len(sessions))
+		}
+	}
+}
+
 type appendingDesktopRunner struct {
 	session *agent.Session
 	started chan string
@@ -1219,7 +1312,7 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	workspace := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(workspace, "extendai-lab.toml"), []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
 	dir := config.SessionDir()
@@ -1313,7 +1406,7 @@ func TestCapabilitiesShowsDefaultMCPAsInitializingNotDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1379,7 +1472,7 @@ func TestCapabilitiesMarksBackgroundRemoteMCPAuthPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1412,7 +1505,7 @@ func TestCapabilitiesDoesNotMarkRemoteMCPWithAuthHeaderPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1446,7 +1539,7 @@ func TestCapabilitiesMarksAuthFailureRequired(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1481,7 +1574,7 @@ func TestClearMCPServerAuthenticationClearsConfigAndFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1544,7 +1637,7 @@ func TestUpdateMCPServerMigratesLegacyTierToBackground(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1595,7 +1688,7 @@ tier = "lazy"
 	if userPlugin.Tier != "" {
 		t.Fatalf("user plugin tier = %q, want migrated empty", userPlugin.Tier)
 	}
-	projectCfg := config.LoadForEdit(filepath.Join(dir, "extendai-lab.toml"))
+	projectCfg := config.LoadForEdit(filepath.Join(dir, "reasonix.toml"))
 	if _, ok := findPluginEntry(projectCfg.Plugins, "playwright"); ok {
 		t.Fatalf("project plugin should be removed after desktop migration: %+v", projectCfg.Plugins)
 	}
@@ -1618,7 +1711,7 @@ func TestUpdateMCPServerSplitsPastedCommandLine(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1658,7 +1751,7 @@ func TestUpdateMCPServerRecordsReconnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1713,7 +1806,7 @@ func TestSetMCPServerTierRecordsConnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1751,7 +1844,7 @@ tier = "lazy"
 	if userPlugin.Tier != "" {
 		t.Fatalf("user plugin tier = %q, want migrated empty", userPlugin.Tier)
 	}
-	projectCfg := config.LoadForEdit(filepath.Join(dir, "extendai-lab.toml"))
+	projectCfg := config.LoadForEdit(filepath.Join(dir, "reasonix.toml"))
 	if _, ok := findPluginEntry(projectCfg.Plugins, "broken"); ok {
 		t.Fatalf("project plugin should be removed after desktop migration: %+v", projectCfg.Plugins)
 	}
@@ -1773,7 +1866,7 @@ tier = "lazy"
 	t.Fatalf("broken MCP missing from Capabilities: %+v", view.Servers)
 }
 
-func TestSetMCPServerTierPersistsCodegraphConfig(t *testing.T) {
+func TestSetMCPServerTierEnablesCodegraphAndIgnoresLegacyTier(t *testing.T) {
 	t.Setenv("HOME", robustTempDir(t))
 	t.Setenv("USERPROFILE", robustTempDir(t))
 	t.Setenv("XDG_CONFIG_HOME", robustTempDir(t))
@@ -1782,7 +1875,7 @@ func TestSetMCPServerTierPersistsCodegraphConfig(t *testing.T) {
 	t.Setenv("REASONIX_CACHE_DIR", robustTempDir(t)) // isolate the codegraph bundle cache so Resolve fails deterministically
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 auto_install = true
@@ -1794,7 +1887,7 @@ auto_install = true
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
 	defer app.activeCtrl().Close()
 
-	if err := app.SetMCPServerTier("codegraph", "background"); err != nil {
+	if err := app.SetMCPServerTier("codegraph", "eager"); err != nil {
 		t.Fatalf("SetMCPServerTier(codegraph): %v", err)
 	}
 	cfg, err := config.Load()
@@ -1802,17 +1895,17 @@ auto_install = true
 		t.Fatal(err)
 	}
 	if !cfg.Codegraph.Enabled {
-		t.Fatal("codegraph enabled = false, want true after selecting a startup tier")
+		t.Fatal("codegraph enabled = false, want true after legacy tier update")
 	}
 	if got := cfg.Codegraph.Tier; got != "" {
-		t.Fatalf("codegraph tier = %q, want migrated empty", got)
+		t.Fatalf("codegraph tier = %q, want ignored legacy tier", got)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	if !userCfg.Codegraph.Enabled {
-		t.Fatal("user codegraph enabled = false, want true after selecting a startup tier")
+		t.Fatal("user codegraph enabled = false, want true after legacy tier update")
 	}
 	if got := userCfg.Codegraph.Tier; got != "" {
-		t.Fatalf("user codegraph tier = %q, want migrated empty", got)
+		t.Fatalf("user codegraph tier = %q, want ignored legacy tier", got)
 	}
 	if !mcpFailed(app.activeCtrl(), "codegraph") {
 		t.Fatalf("Host.Failures() = %+v, want codegraph failure recorded for missing runtime", app.activeCtrl().Host().Failures())
@@ -1836,7 +1929,7 @@ func TestSetMCPServerEnabledPersistsCodegraphOff(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = true
 tier = "lazy"
@@ -1878,7 +1971,7 @@ func TestCapabilitiesMigratesFailedMCPConfiguredTierAfterRestart(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -2014,4 +2107,23 @@ func hasDirEntry(entries []DirEntry, name string) bool {
 		}
 	}
 	return false
+}
+
+func TestSessionActionsWithoutControllerReturnError(t *testing.T) {
+	app := &App{tabs: map[string]*WorkspaceTab{}}
+	if err := app.NewSession(); err == nil {
+		t.Error("NewSession with no controller must surface an error, not silently no-op")
+	}
+	if err := app.ClearSession(); err == nil {
+		t.Error("ClearSession with no controller must surface an error")
+	}
+
+	app = &App{
+		tabs:        map[string]*WorkspaceTab{"t1": {ID: "t1", StartupErr: "boot exploded"}},
+		activeTabID: "t1",
+	}
+	err := app.NewSession()
+	if err == nil || !strings.Contains(err.Error(), "boot exploded") {
+		t.Errorf("error should carry the tab's startup failure, got %v", err)
+	}
 }

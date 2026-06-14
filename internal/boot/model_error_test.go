@@ -18,7 +18,7 @@ import (
 func TestBuildUnknownModelErrorIsActionable(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	writeFile(t, dir, "extendai-lab.toml", `
+	writeFile(t, dir, "reasonix.toml", `
 default_model = "mimo"
 
 [codegraph]
@@ -51,7 +51,7 @@ func TestBuildNoticesMissingAPIKey(t *testing.T) {
 	const keyEnv = "REASONIX_MISSING_KEY_FOR_TEST"
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	writeFile(t, dir, "extendai-lab.toml", `
+	writeFile(t, dir, "reasonix.toml", `
 default_model = "x"
 
 [codegraph]

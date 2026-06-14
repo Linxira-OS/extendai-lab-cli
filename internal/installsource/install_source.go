@@ -397,9 +397,9 @@ func (t *installSourceTool) resolveSkillPath(name, scope string) (string, bool) 
 		if t.home == "" {
 			return "", false
 		}
-		root = filepath.Join(t.home, ".extendai-lab", skill.SkillsDirname)
+		root = filepath.Join(t.home, ".reasonix", skill.SkillsDirname)
 	} else {
-		root = filepath.Join(t.root, ".extendai-lab", skill.SkillsDirname)
+		root = filepath.Join(t.root, ".reasonix", skill.SkillsDirname)
 	}
 	flat := filepath.Join(root, name+".md")
 	if _, err := lstat(flat); err == nil {
@@ -458,7 +458,7 @@ func (t *installSourceTool) configPath(scope string) string {
 			return p
 		}
 	}
-	return filepath.Join(t.root, "extendai-lab.toml")
+	return filepath.Join(t.root, "reasonix.toml")
 }
 
 func (t *installSourceTool) normalizeScope(scope string) string {

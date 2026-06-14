@@ -39,7 +39,7 @@ type SessionParams struct {
 }
 
 // Factory builds the per-session controller. The composition root (the cli's
-// `extendai-lab acp` command) implements it by reusing setup()'s assembly: a
+// `reasonix acp` command) implements it by reusing setup()'s assembly: a
 // Provider for Model, a tool Registry rooted at Cwd via builtin.Workspace, a
 // per-session MCP host from MCPServers, the event Sink, all wired into a
 // control.Controller. The returned controller owns its own cleanup (Close stops
@@ -63,7 +63,7 @@ type AgentInfo struct {
 // Serve runs an ACP agent on r/w (stdin/stdout in production) until the input
 // ends or ctx is cancelled. It owns the JSON-RPC connection and the session
 // registry; the Factory supplies the kernel wiring. This is the single entry
-// point the `extendai-lab acp` command calls.
+// point the `reasonix acp` command calls.
 //
 // stdout is the JSON-RPC channel: callers must keep all other output (logs,
 // diagnostics) off w and on stderr, or the wire corrupts.
@@ -916,6 +916,9 @@ func deleteSessionFiles(sessionPath string) error {
 		if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
 			return err
 		}
+	}
+	if err := agent.DeleteSubagentsByParent(filepath.Dir(sessionPath), agent.BranchID(sessionPath)); err != nil {
+		return err
 	}
 	return nil
 }

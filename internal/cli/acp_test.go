@@ -72,8 +72,11 @@ func TestACPFactoryLoadsSessionCwdProjectConfig(t *testing.T) {
 	home := isolateCLIConfigHome(t)
 	t.Setenv("REASONIX_TEST_KEY", "test-key")
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "extendai-lab.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 default_model = "local"
+
+[codegraph]
+enabled = false
 
 [[providers]]
 name = "local"
@@ -84,7 +87,7 @@ api_key_env = "REASONIX_TEST_KEY"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmdDir := filepath.Join(project, ".extendai-lab", "commands")
+	cmdDir := filepath.Join(project, ".reasonix", "commands")
 	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ import (
 // edit.go is the programmatic mutation surface a settings UI drives: change the
 // default model, add/remove a provider, set the planner, edit permission rules,
 // add/remove an MCP server — each validated, then persisted with SaveTo. It is
-// separate from the `extendai-lab setup` wizard (cli) so a GUI can apply one setting at a
+// separate from the `reasonix setup` wizard (cli) so a GUI can apply one setting at a
 // time without replaying the whole interactive flow. Every mutator works on the
 // in-memory *Config; nothing writes to disk until SaveTo/Save is called, so a UI
 // can stage several changes and commit once. Mutations round-trip through
@@ -29,12 +29,20 @@ const (
 	listDeny  = "deny"
 )
 
-// SetDefaultModel points default_model at an existing provider. It errors if no
-// provider by that name is configured, so a UI can't strand the config on a
-// model that doesn't exist.
+// SetDefaultModel points default_model at an existing model. It accepts both
+// forms used by the runtime resolver:
+//   - "provider"          — the provider's own default model;
+//   - "provider/model"    — that specific model under that provider.
+//
+// Either is rejected when the target does not exist, so a UI can't strand
+// the config on a model that doesn't exist.
 func (c *Config) SetDefaultModel(name string) error {
-	if _, ok := c.Provider(name); !ok {
-		return fmt.Errorf("set default: no provider %q (configured: %s)", name, c.providerNames())
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("set default: empty name")
+	}
+	if _, ok := c.ResolveModel(name); !ok {
+		return fmt.Errorf("set default: no such model %q (configured: %s)", name, c.providerNames())
 	}
 	c.DefaultModel = name
 	return nil
@@ -65,6 +73,20 @@ func (c *Config) SetAutoPlan(mode string) error {
 		c.Agent.AutoPlan = "on"
 	default:
 		return fmt.Errorf("auto_plan %q: must be off|on", mode)
+	}
+	return nil
+}
+
+// SetUIShortcutLayout selects the CLI keyboard shortcut layout. "classic" keeps
+// historical behavior; "desktop" enables the two-axis desktop-style shortcuts.
+func (c *Config) SetUIShortcutLayout(layout string) error {
+	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "", "classic", "default", "legacy", "off":
+		c.UI.ShortcutLayout = "classic"
+	case "desktop", "dual", "dual-axis", "dual_axis":
+		c.UI.ShortcutLayout = "desktop"
+	default:
+		return fmt.Errorf("shortcut_layout %q: must be classic|desktop", layout)
 	}
 	return nil
 }
@@ -149,7 +171,7 @@ func (c *Config) SetDesktopAppearance(theme, style string) error {
 	}
 	normalized := normalizeThemeStyle(style)
 	if normalized == "" {
-		return fmt.Errorf("desktop theme style %q: must be graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier", style)
+		return fmt.Errorf("desktop theme style %q: must be graphite|aurora|slate|carbon|nocturne|amber", style)
 	}
 	c.Desktop.ThemeStyle = normalized
 	return nil
@@ -170,9 +192,60 @@ func (c *Config) SetDesktopCloseBehavior(mode string) error {
 	return nil
 }
 
+// SetDesktopDisplayMode sets the transcript display mode. UI-only.
+func (c *Config) SetDesktopDisplayMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "compact":
+		c.Desktop.DisplayMode = "compact"
+	case "minimal":
+		c.Desktop.DisplayMode = "minimal"
+	case "", "standard":
+		c.Desktop.DisplayMode = "standard"
+	default:
+		return fmt.Errorf("display mode %q: must be standard|compact|minimal", mode)
+	}
+	return nil
+}
+
+// SetDesktopCheckUpdates sets whether the desktop app checks for updates on
+// startup. Manual checks remain available in Settings regardless of this value.
+func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
+	c.Desktop.CheckUpdates = &enabled
+	return nil
+}
+
+// SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
+func (c *Config) SetDesktopTelemetry(enabled bool) error {
+	c.Desktop.Telemetry = &enabled
+	return nil
+}
+
+// SetDesktopMetrics sets whether the desktop sends opt-in aggregate agent metrics.
+func (c *Config) SetDesktopMetrics(enabled bool) error {
+	c.Desktop.Metrics = &enabled
+	return nil
+}
+
 // SetUICloseBehavior is kept for callers compiled against the old edit API.
 func (c *Config) SetUICloseBehavior(mode string) error {
 	return c.SetDesktopCloseBehavior(mode)
+}
+
+// SetExpandThinking sets whether the desktop reasoning/thinking section is
+// expanded by default. It is desktop-only and must not affect CLI output or
+// provider-visible request data.
+func (c *Config) SetExpandThinking(on bool) error {
+	c.Desktop.ExpandThinking = on
+	return nil
+}
+
+// SetShowReasoning sets the CLI's default verbose-reasoning preference. When
+// true, thinking text is shown in the chat TUI on startup; when false (the
+// default), it stays collapsed until the user toggles it with Ctrl+O or
+// /verbose.
+func (c *Config) SetShowReasoning(on bool) error {
+	c.UI.ShowReasoning = on
+	return nil
 }
 
 // SetProviderThinking updates a provider's provider-specific thinking mode knob.
@@ -567,7 +640,7 @@ func (c *Config) ClearPluginAuthentication(name string) (PluginEntry, bool, erro
 // ClearPluginAuthenticationInSource clears auth material in the file that actually
 // owns the MCP server. Load() merges user/project TOML and project .mcp.json into
 // one Config, so callers must not mutate that merged view and Save() it back: a
-// .mcp.json-only server would otherwise be serialized into extendai-lab.toml or the
+// .mcp.json-only server would otherwise be serialized into reasonix.toml or the
 // user config. Source priority mirrors Load(): project TOML, user TOML, then the
 // project .mcp.json entry if TOML did not define that server.
 func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, error) {
@@ -592,7 +665,7 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 }
 
 func pluginTOMLSourcePath(name string) string {
-	for _, path := range []string{"extendai-lab.toml", userConfigPath()} {
+	for _, path := range []string{"reasonix.toml", userConfigPath()} {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
@@ -628,7 +701,7 @@ func validatePlugin(e PluginEntry) error {
 
 // SaveTo writes the configuration to path as annotated TOML, atomically: it
 // writes a sibling temp file then renames, so a crash mid-write can't leave a
-// half-written extendai-lab.toml that fails to parse on next load. Parent directories
+// half-written reasonix.toml that fails to parse on next load. Parent directories
 // are created as needed.
 func (c *Config) SaveTo(path string) error {
 	return c.SaveToScope(path, renderScopeForPath(path))
@@ -667,7 +740,7 @@ func writeConfigFile(path, body string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("save: create dir: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".extendai-lab.*.toml.tmp")
+	tmp, err := os.CreateTemp(dir, ".reasonix.*.toml.tmp")
 	if err != nil {
 		return fmt.Errorf("save: create temp: %w", err)
 	}
@@ -706,23 +779,23 @@ func isUserConfigPath(path string) bool {
 }
 
 // Save writes the configuration back to the file it was loaded from
-// (SourcePath), or to ./extendai-lab.toml when none exists yet — the conventional
+// (SourcePath), or to ./reasonix.toml when none exists yet — the conventional
 // project-local target a fresh GUI session would create.
 func (c *Config) Save() error {
 	path := SourcePath()
 	if path == "" {
-		path = "extendai-lab.toml"
+		path = "reasonix.toml"
 	}
 	return c.SaveTo(path)
 }
 
-// SaveForRoot saves the config to root's extendai-lab.toml, falling back to the
-// user's global config when root has no existing extendai-lab.toml.
+// SaveForRoot saves the config to root's reasonix.toml, falling back to the
+// user's global config when root has no existing reasonix.toml.
 func (c *Config) SaveForRoot(root string) error {
 	root = resolveRoot(root)
-	projectTOML := "extendai-lab.toml"
+	projectTOML := "reasonix.toml"
 	if root != "." {
-		projectTOML = filepath.Join(root, "extendai-lab.toml")
+		projectTOML = filepath.Join(root, "reasonix.toml")
 	}
 	if _, err := os.Stat(projectTOML); err == nil {
 		return c.SaveTo(projectTOML)

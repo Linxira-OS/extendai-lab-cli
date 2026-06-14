@@ -12,11 +12,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
@@ -96,6 +99,9 @@ func Run(args []string, version string) int {
 	case "review":
 		configureCLIThemeFromConfigNoProbe()
 		return reviewCommand(rest)
+	case "bot":
+		configureCLIThemeFromConfigNoProbe()
+		return botCommand(rest, version)
 	case "version", "--version", "-v":
 		fmt.Println("reasonix", version)
 		return 0
@@ -111,7 +117,7 @@ func Run(args []string, version string) int {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot":
 		return true
 	default:
 		return false
@@ -205,6 +211,9 @@ func runAgent(args []string) int {
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
+	cont := fs.Bool("continue", false, "resume the most recent saved session")
+	fs.BoolVar(cont, "c", false, "shorthand for --continue")
+	resume := fs.String("resume", "", "resume a specific session file (non-interactive; takes precedence over --continue)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -223,7 +232,7 @@ func runAgent(args []string) int {
 		return 2
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
 	// Live run: render the agent's event stream to stdout. Markdown post-stream
@@ -252,6 +261,38 @@ func runAgent(args []string) int {
 		return 1
 	}
 	defer ctrl.Close()
+
+	// --resume: load a specific session file (non-interactive, meant for
+	// MCP/API callers that manage their own per-project session). Takes
+	// precedence over --continue.
+	// --continue: resume the most recent saved session.
+	if *resume != "" {
+		loaded, err := agent.LoadSession(*resume)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		ctrl.Resume(loaded, *resume)
+	} else if *cont {
+		sessions, err := agent.ListSessions(config.SessionDir())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		if len(sessions) == 0 {
+			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
+			return 1
+		}
+		loaded, err := agent.LoadSession(sessions[0].Path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		ctrl.Resume(loaded, sessions[0].Path)
+	}
+	if ctrl.SessionPath() == "" && ctrl.SessionDir() != "" {
+		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+	}
 
 	runErr := ctrl.Run(ctx, prompt)
 	if cfg != nil {
@@ -304,9 +345,9 @@ func runServe(args []string) int {
 		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 	}
 
-	fmt.Printf("extendai-lab serve — %s on http://%s\n", ctrl.Label(), *addr)
+	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
 	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := serve.New(ctrl, bc).RunGraceful(ctx, *addr); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -325,7 +366,7 @@ func chatREPL(args []string) int {
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	resume := fs.Bool("resume", false, "list saved sessions and pick one to resume")
-	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve every tool call this session (deny rules still apply)")
+	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve approval-gated tool calls this session; same runtime mode as Ctrl+Y")
 	fs.BoolVar(yolo, "yolo", false, "alias for --dangerously-skip-permissions")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	if err := fs.Parse(args); err != nil {
@@ -426,15 +467,18 @@ func chatREPL(args []string) int {
 	// event and blocks until the user answers via ctrl.Approve. Sub-agents (the
 	// task tool) keep their headless gate from setup — no UI to prompt through.
 	ctrl.EnableInteractiveApproval()
-	// YOLO: skip every approval prompt for the session (deny rules still apply).
+	// YOLO: skip every tool approval request for the session (deny rules still
+	// apply; ask questions and plan approvals still wait for the user).
 	if *yolo {
-		ctrl.SetBypass(true)
+		ctrl.SetAutoApproveTools(true)
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
 	if cfg, err := config.Load(); err == nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row
+		m.showReasoning = cfg.UI.ShowReasoning   // /verbose persistence: start with config default
+		m.cfg = cfg
 	}
 
 	// /model support: a pure builder the TUI calls to rebuild on a different
@@ -456,7 +500,7 @@ func chatREPL(args []string) int {
 		}
 		c.EnableInteractiveApproval()
 		if *yolo {
-			c.SetBypass(true)
+			c.SetAutoApproveTools(true)
 		}
 		return c, nil
 	}
@@ -471,11 +515,27 @@ func chatREPL(args []string) int {
 	}
 	m.refreshEffortStatus()
 
-	// No alt-screen: finalized transcript lines are committed to the terminal's
-	// normal buffer (via tea.Println) so native scrollback, the wheel, and copy
-	// all work — the bubbletea-managed region is just the bottom input/status.
+	if m.nativeScrollback {
+		reserveNativeScrollbackFrame(os.Stdout, m.bottomRows())
+	}
+
+	// Non-Termux terminals use an alt-screen transcript viewport. Termux stays
+	// in the normal buffer so native touch scrollback and soft-keyboard focus
+	// keep working; finalized transcript lines are emitted via tea.Println.
 	p := tea.NewProgram(m)
+	// SSH drop (SIGHUP) or service stop (SIGTERM): persist the conversation
+	// before the terminal goes away, then unwind through the normal close path
+	// so resume picks up the interrupted session (#3772).
+	hangup := make(chan os.Signal, 1)
+	signal.Notify(hangup, syscall.SIGHUP, syscall.SIGTERM)
+	go func() {
+		for range hangup {
+			_ = ctrl.Snapshot()
+			p.Quit()
+		}
+	}()
 	final, runErr := p.Run()
+	signal.Stop(hangup)
 	// Close the active controller plus any retired ones from /model switches.
 	// Retired controllers were stashed rather than closed at switch time
 	// because Controller.Close() runs SessionEnd hooks and kills plugin
@@ -500,6 +560,12 @@ func chatREPL(args []string) int {
 	return 0
 }
 
+func reserveNativeScrollbackFrame(w io.Writer, rows int) {
+	for i := 0; i < rows; i++ {
+		fmt.Fprintln(w)
+	}
+}
+
 // setupTargets is where the wizard writes: the TOML config and the secrets file.
 // Keys always go to the reasonix-owned global credentials file so they never land
 // in a project's own .env; only the config location is project-local under --local.
@@ -509,12 +575,12 @@ type setupTargets struct {
 }
 
 // defaultConfigTarget is the user-global config file, falling back to a
-// project-local extendai-lab.toml only when the user config dir can't be resolved.
+// project-local reasonix.toml only when the user config dir can't be resolved.
 func defaultConfigTarget() string {
 	if p := config.UserConfigPath(); p != "" {
 		return p
 	}
-	return "extendai-lab.toml"
+	return "reasonix.toml"
 }
 
 // defaultEnvTarget is the reasonix-owned global credentials file, falling back to
@@ -526,15 +592,15 @@ func defaultEnvTarget() string {
 	return ".env"
 }
 
-// resolveSetupTargets picks where `extendai-lab setup` writes. Keys always go to the
-// global env. The config goes to the user-global dir by default, to ./extendai-lab.toml
+// resolveSetupTargets picks where `reasonix setup` writes. Keys always go to the
+// global env. The config goes to the user-global dir by default, to ./reasonix.toml
 // under --local, or to an explicit path argument when given.
 func resolveSetupTargets(args []string) setupTargets {
 	t := setupTargets{config: defaultConfigTarget(), env: defaultEnvTarget()}
 	for _, a := range args {
 		switch a {
 		case "--local", "-l":
-			t.config = "extendai-lab.toml"
+			t.config = "reasonix.toml"
 		default:
 			t.config = a
 		}
@@ -550,8 +616,8 @@ func displayPath(p string) string {
 	return p
 }
 
-// setupConfig runs the configuration wizard (the `extendai-lab setup` command),
-// writing config.toml to the user-global dir (or ./extendai-lab.toml under --local)
+// setupConfig runs the configuration wizard (the `reasonix setup` command),
+// writing config.toml to the user-global dir (or ./reasonix.toml under --local)
 // and API keys to the reasonix-owned global .env — never a project's own .env.
 // Project memory is a separate concern — the in-session `/init` skill generates
 // AGENTS.md (see initHint).
@@ -575,7 +641,7 @@ func setupConfig(args []string) int {
 	if isInteractive() {
 		rc := interactiveSetup(t.config, t.env)
 		if rc == 0 {
-			fmt.Printf(i18n.M.TryHintFmt+"\n", bold("extendai-lab chat"))
+			fmt.Printf(i18n.M.TryHintFmt+"\n", bold("reasonix chat"))
 		}
 		return rc
 	}
@@ -604,7 +670,7 @@ func writeDefaultConfig(path string) int {
 // initHint handles `reasonix init`. Unlike a config scaffold, project memory is
 // model-generated by analyzing the codebase, so it lives as the in-session
 // `/init` skill rather than a CLI command. This entry just points the user there
-// (and to `extendai-lab setup` for config) so the verb isn't a dead end.
+// (and to `reasonix setup` for config) so the verb isn't a dead end.
 func initHint() int {
 	fmt.Println(i18n.M.InitHint)
 	return 0
@@ -898,6 +964,42 @@ func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
 	return models
 }
 
+// fetchModelListCompat walks the full set of model-list URL candidates a given
+// base URL can resolve to (root, /v1, known OpenAI/Anthropic compat suffixes)
+// and returns the first successful fetch. This is the wizard-time probe for a
+// *user-supplied* custom provider — its baseURL is whatever the user pasted,
+// and "whatever they pasted" might be https://x.com (root, probe /v1/models)
+// or https://x.com/v1 (versioned, probe /v1/models directly). Previously the
+// wizard hardcoded `baseURL + "/models"`, which works for OpenAI-shape URLs
+// but silently fails for Anthropic-shape roots and the reverse — so the
+// wizard's idea of "what models exist" diverged from the chat client's actual
+// endpoint. Returning the empty slice (not an error) on full miss lets the
+// wizard fall through to a manual text input without an error message.
+func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string, error) {
+	candidates, err := config.BuildModelFetchURLs(baseURL, "")
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for _, u := range candidates {
+		models, err := openai.FetchModels(ctx, u, apiKey)
+		if err == nil {
+			return models, nil
+		}
+		lastErr = err
+		// An endpoint-miss is not a hard error — try the next candidate.
+		// Anything else (auth, 5xx, bad TLS) bubbles up immediately because
+		// retrying it on a sibling URL won't help.
+		if !openai.IsModelFetchEndpointMiss(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		slog.Debug("model-list probe: all candidates missed", "base_url", baseURL, "err", lastErr)
+	}
+	return nil, nil
+}
+
 // buildFamilyEntry returns a single ProviderEntry exposing the user's
 // selected models under one entry. It preserves the preset's API key env,
 // base URL, kind, context window, pricing, and effort — the things that
@@ -960,12 +1062,12 @@ func containsString(xs []string, v string) bool {
 
 // filterStaleCustomEntries drops the wizard's own magic-name entries
 // (Name="custom" with Kind="openai" or Name="anthropic" with Kind="anthropic")
-// that older versions of the wizard wrote into extendai-lab.toml. They collide
+// that older versions of the wizard wrote into reasonix.toml. They collide
 // with the wizard's "custom" / "anthropic" menu items on re-run, showing up
 // as duplicate broken entries. The new wizard writes host-derived slugs
 // (e.g. "custom-token-sensenova-cn") so a hit on the magic name is
 // unambiguously stale. The returned slice is the dropped set so the caller
-// can warn the user to clean up extendai-lab.toml by hand.
+// can warn the user to clean up reasonix.toml by hand.
 func filterStaleCustomEntries(providers []config.ProviderEntry) (kept, dropped []config.ProviderEntry) {
 	for _, p := range providers {
 		if p.Name == "custom" && p.Kind == "openai" {
@@ -986,9 +1088,9 @@ func filterStaleCustomEntries(providers []config.ProviderEntry) (kept, dropped [
 // "custom-token-sensenova-cn" or "anthropic-api-anthropic-com". We can't
 // reuse the wizard's menu-item labels ("custom" / "anthropic") because
 // those would collide with the menu item itself and end up rendered as
-// duplicate provider entries on subsequent re-runs of `extendai-lab setup`.
+// duplicate provider entries on subsequent re-runs of `reasonix setup`.
 // The host-based slug also gives users a meaningful name to grep for in
-// extendai-lab.toml. Falls back to a short sha1 of the raw URL when the URL
+// reasonix.toml. Falls back to a short sha1 of the raw URL when the URL
 // doesn't parse, so even malformed input still produces a unique name.
 func providerSlug(kind, baseURL string) string {
 	var host string
@@ -1018,7 +1120,7 @@ func providerSlug(kind, baseURL string) string {
 }
 
 // providerFamily is a wizard-only grouping of provider SKUs by vendor; it does
-// not exist in config because users editing extendai-lab.toml deal with SKU names
+// not exist in config because users editing reasonix.toml deal with SKU names
 // directly. Keys mirror the SKU name prefix (deepseek-*, mimo) so adding a new
 // preset only requires a familyOf case.
 type providerFamily struct {
@@ -1113,7 +1215,7 @@ func promptCustomProviderFromURL() ([]config.ProviderEntry, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchingModelsFmt, "custom")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsFailedFmt, "custom", err)))
@@ -1219,7 +1321,7 @@ func promptAnthropicProviderFromURL() ([]config.ProviderEntry, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchingModelsFmt, "anthropic")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchModelsFailedFmt, "anthropic", err)))
@@ -1267,7 +1369,7 @@ func groupByFamily(providers []config.ProviderEntry) ([]string, map[string][]int
 
 // withBuiltinFamilies guarantees the wizard always offers the built-in provider
 // families (DeepSeek, MiMo) even when the loaded config replaced them — a
-// extendai-lab.toml that defines only [[providers]] for deepseek otherwise hides
+// reasonix.toml that defines only [[providers]] for deepseek otherwise hides
 // MiMo from setup, since [[providers]] replaces the presets wholesale. Families
 // already present are left untouched (the user's customizations win); only the
 // missing built-in families get their default entries appended.
@@ -1284,12 +1386,12 @@ func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntr
 	return providers
 }
 
-// promptMissingKeys re-runs the wizard's key-entry step for any enabled
-// provider whose api_key_env is unset. Newly entered values are appended to the
-// reasonix-owned global .env so the chat session that follows picks them up via
-// config.Load. The user can hit Enter to skip — the chat banner falls back to a
-// one-line warning so they still see what's missing. Returns a non-zero exit
-// code only when writing the env file fails.
+// promptMissingKeys re-runs the wizard's key-entry step for model refs that are
+// actually active and whose api_key_env is unset. Newly entered values are
+// appended to the reasonix-owned global .env so the chat session that follows
+// picks them up via config.Load. The user can hit Enter to skip — the chat
+// banner falls back to a one-line warning so they still see what's missing.
+// Returns a non-zero exit code only when writing the env file fails.
 func promptMissingKeys(cfg *config.Config) int {
 	missing := providersWithMissingKeys(cfg)
 	if len(missing) == 0 {
@@ -1310,15 +1412,48 @@ func promptMissingKeys(cfg *config.Config) int {
 	return 0
 }
 
-// providersWithMissingKeys returns the subset of cfg.Providers whose api_key_env
-// is declared but not currently set in the environment. configureKeys dedupes
-// shared envs, so duplicates are fine to leave in.
+// providersWithMissingKeys returns the providers the active configuration
+// actually references (default/planner/subagent models) whose api_key_env is
+// declared but not set. Merely-available presets stay silent — a DeepSeek-only
+// user must not be prompted for MIMO_API_KEY (#3939); the chat banner still
+// warns if they later switch to a model whose key is missing. configureKeys
+// dedupes shared envs, so duplicates are fine to leave in.
 func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
-	var out []config.ProviderEntry
-	for _, p := range cfg.Providers {
-		if p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) == "" {
-			out = append(out, p)
+	if cfg == nil {
+		return nil
+	}
+	refs := []string{
+		cfg.DefaultModel,
+		cfg.Agent.PlannerModel,
+		cfg.Agent.SubagentModel,
+	}
+	if !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") {
+		refs = append(refs, cfg.Agent.AutoPlanClassifier)
+	}
+	if len(cfg.Agent.SubagentModels) > 0 {
+		keys := make([]string, 0, len(cfg.Agent.SubagentModels))
+		for key := range cfg.Agent.SubagentModels {
+			keys = append(keys, key)
 		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			refs = append(refs, cfg.Agent.SubagentModels[key])
+		}
+	}
+
+	var out []config.ProviderEntry
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		p, ok := cfg.ResolveModel(ref)
+		if !ok || p.APIKeyEnv == "" || os.Getenv(p.APIKeyEnv) != "" || seen[p.APIKeyEnv] {
+			continue
+		}
+		seen[p.APIKeyEnv] = true
+		out = append(out, *p)
 	}
 	return out
 }
@@ -1391,7 +1526,7 @@ func isTTY(f *os.File) bool {
 
 // appendEnv merges KEY=value lines into a .env file. Existing assignments of
 // any key that's about to be written are dropped first, then the new values
-// are appended — so re-running `extendai-lab setup` with a corrected key replaces the
+// are appended — so re-running `reasonix setup` with a corrected key replaces the
 // stale one instead of stacking duplicates (loadDotEnv is first-wins, so a
 // naive append would leave the old key in effect). The new values are also
 // pinned into the current process env so a chat session started right after
@@ -1479,7 +1614,7 @@ func welcome(version string) int {
 			if cfg.Language != "" {
 				i18n.DetectLanguage(cfg.Language)
 			}
-			fmt.Printf("\n"+i18n.M.StartingChatFmt+"\n\n", bold("extendai-lab chat"))
+			fmt.Printf("\n"+i18n.M.StartingChatFmt+"\n\n", bold("reasonix chat"))
 			return chatREPL(nil)
 		}
 		fmt.Println("\n" + i18n.M.SetKeyHint)
@@ -1536,13 +1671,13 @@ func welcome(version string) int {
 		n++
 	}
 	if src == "" {
-		step("extendai-lab setup", i18n.M.StepScaffold)
+		step("reasonix setup", i18n.M.StepScaffold)
 	}
 	if ready == 0 {
 		step(i18n.M.StepSetKey, i18n.M.StepSetKeyHint)
 	}
-	step("extendai-lab chat", i18n.M.StepChatDesc)
-	step(`extendai-lab run "task"`, i18n.M.StepRunDesc)
+	step("reasonix chat", i18n.M.StepChatDesc)
+	step(`reasonix run "task"`, i18n.M.StepRunDesc)
 
 	fmt.Fprintf(&b, "\n  %s\n", dim(i18n.M.HelpFooter))
 
@@ -1574,7 +1709,7 @@ func configCommand(args []string) int {
 
 func configAutoPlanCommand(args []string) int {
 	fs := flag.NewFlagSet("config auto-plan", flag.ContinueOnError)
-	local := fs.Bool("local", false, "write ./extendai-lab.toml instead of the user config")
+	local := fs.Bool("local", false, "write ./reasonix.toml instead of the user config")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -1596,7 +1731,7 @@ func configAutoPlanCommand(args []string) int {
 	}
 	path := config.UserConfigPath()
 	if *local {
-		path = "extendai-lab.toml"
+		path = "reasonix.toml"
 	}
 	if path == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
@@ -1636,12 +1771,12 @@ func configAutoPlanCommand(args []string) int {
 
 func configUsage() {
 	fmt.Print(`Usage:
-  extendai-lab config auto-plan [--local] [off|on]
+  reasonix config auto-plan [--local] [off|on]
 `)
 }
 
 func configAutoPlanUsage() {
 	fmt.Print(`Usage:
-  extendai-lab config auto-plan [--local] [off|on]
+  reasonix config auto-plan [--local] [off|on]
 `)
 }

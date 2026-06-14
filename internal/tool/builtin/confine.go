@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
@@ -21,11 +22,10 @@ func ConfineBash(spec sandbox.Spec, timeout ...time.Duration) tool.Tool {
 	return b
 }
 
-// ConfineWebFetch returns the web_fetch built-in bound to a proxy URL,
-// overriding the unconfined instance registered at init. An empty proxyURL
-// yields the unconfined behavior (direct connection with SSRF guard).
-func ConfineWebFetch(proxyURL string) tool.Tool {
-	return webFetch{proxyURL: proxyURL}
+// ConfineWebFetch returns the web_fetch built-in bound to Reasonix proxy
+// settings while preserving its SSRF-guarded dialer.
+func ConfineWebFetch(proxySpec netclient.ProxySpec) tool.Tool {
+	return webFetch{proxySpec: proxySpec}
 }
 
 // ConfineWriters returns the file-writing built-ins (write_file, edit_file,
@@ -77,7 +77,7 @@ func confine(roots []string, target string) error {
 		}
 	}
 	return fmt.Errorf("path %q is outside the workspace (writes are confined to %s); "+
-		"write inside it, or widen [sandbox] workspace_root / allow_write in extendai-lab.toml",
+		"write inside it, or widen [sandbox] workspace_root / allow_write in reasonix.toml",
 		target, strings.Join(roots, ", "))
 }
 

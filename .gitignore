@@ -66,10 +66,9 @@ REASONIX.md
 Thumbs.db
 .idea/
 .vscode/
+/site/public/av/
 
-# Scratch / agent working dirs (never committed)
-/tmp/
-/.codex/
+benchmarks/context-maintenance-e2e/run/
 
 # Local scripts
 /run-tui.ps1

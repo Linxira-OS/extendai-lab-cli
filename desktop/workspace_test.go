@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
+	"reasonix/internal/config"
 )
 
 // --- workspaceStatePath ---
@@ -75,13 +77,57 @@ func TestDialogDefaultDirectoryFallsBackFromMissingWorkspace(t *testing.T) {
 
 func TestDialogDefaultDirectoryUsesFileParent(t *testing.T) {
 	dir := t.TempDir()
-	file := filepath.Join(dir, "extendai-lab.toml")
+	file := filepath.Join(dir, "reasonix.toml")
 	if err := os.WriteFile(file, []byte("default_model = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	if got := dialogDefaultDirectory(file); got != dir {
 		t.Fatalf("dialogDefaultDirectory(file) = %q, want %q", got, dir)
+	}
+}
+
+func TestDesktopSessionDirIsScopedByWorkspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	rootA := filepath.Join(t.TempDir(), "project-a")
+	rootB := filepath.Join(t.TempDir(), "project-b")
+	if err := os.MkdirAll(rootA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rootB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dirA := desktopSessionDir(rootA)
+	dirB := desktopSessionDir(rootB)
+	if dirA == "" || dirB == "" {
+		t.Fatalf("desktop session dirs should resolve: A=%q B=%q", dirA, dirB)
+	}
+	if dirA == dirB {
+		t.Fatalf("different workspaces must not share a desktop session dir: %q", dirA)
+	}
+	if dirA == config.SessionDir() || dirB == config.SessionDir() {
+		t.Fatalf("desktop workspace sessions should not use the global CLI session dir: A=%q B=%q global=%q", dirA, dirB, config.SessionDir())
+	}
+	wantPrefix := filepath.Join(config.MemoryUserDir(), "projects") + string(filepath.Separator)
+	if !strings.HasPrefix(dirA, wantPrefix) || filepath.Base(dirA) != "sessions" {
+		t.Fatalf("workspace session dir should live under the project state tree, got %q", dirA)
+	}
+}
+
+func BenchmarkDesktopSessionDir(b *testing.B) {
+	root := filepath.Join(b.TempDir(), "project")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if desktopSessionDir(root) == "" {
+			b.Fatal("empty session dir")
+		}
 	}
 }
 
@@ -190,7 +236,7 @@ func TestReadFileMediaPreview(t *testing.T) {
 	if image.Body != "" {
 		t.Fatalf("media preview should have empty body, got %q", image.Body)
 	}
-	if !strings.HasPrefix(image.URL, "/__extendai_lab_workspace_media/") || !strings.HasSuffix(image.URL, "/shot.PNG") {
+	if !strings.HasPrefix(image.URL, "/__reasonix_workspace_media/") || !strings.HasSuffix(image.URL, "/shot.PNG") {
 		t.Fatalf("unexpected media URL: %q", image.URL)
 	}
 
@@ -207,7 +253,7 @@ func TestReadFileMediaPreview(t *testing.T) {
 	if pdf.Body != "" {
 		t.Fatalf("media preview should have empty body, got %q", pdf.Body)
 	}
-	if !strings.HasPrefix(pdf.URL, "/__extendai_lab_workspace_media/") || !strings.HasSuffix(pdf.URL, "/report.pdf") {
+	if !strings.HasPrefix(pdf.URL, "/__reasonix_workspace_media/") || !strings.HasSuffix(pdf.URL, "/report.pdf") {
 		t.Fatalf("unexpected media URL: %q", pdf.URL)
 	}
 }
@@ -265,14 +311,21 @@ func TestMediaTokenHandlerEscapedFilename(t *testing.T) {
 	}
 
 	name := `weird "file" name.png`
+	rawURLChars := []string{" ", `"`}
+	if runtime.GOOS == "windows" {
+		name = "weird #file name.png"
+		rawURLChars = []string{" ", "#"}
+	}
 	if err := os.WriteFile(name, []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	app := NewApp()
 	preview := app.ReadFile(name)
-	if strings.Contains(preview.URL, " ") || strings.Contains(preview.URL, `"`) {
-		t.Fatalf("media URL should path-escape filename, got %q", preview.URL)
+	for _, raw := range rawURLChars {
+		if strings.Contains(preview.URL, raw) {
+			t.Fatalf("media URL should path-escape %q in filename, got %q", raw, preview.URL)
+		}
 	}
 
 	handler := app.workspaceMediaMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -377,7 +430,7 @@ func TestMediaTokenHandlerBadToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/__extendai_lab_workspace_media/deadbeef/fake.png", nil)
+	req := httptest.NewRequest(http.MethodGet, "/__reasonix_workspace_media/deadbeef/fake.png", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

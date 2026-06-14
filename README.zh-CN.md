@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="ExtendAI Lab" width="640"/>
+  <img src="docs/logo.svg" alt="Reasonix" width="640"/>
 </p>
 
 <p align="center">
@@ -7,13 +7,36 @@
   &nbsp;·&nbsp;
   <strong>简体中文</strong>
   &nbsp;·&nbsp;
+  <a href="./docs/GUIDE.zh-CN.md">指南</a>
+  &nbsp;·&nbsp;
   <a href="./docs/SPEC.md">规格</a>
+  &nbsp;·&nbsp;
+  <a href="https://esengine.github.io/DeepSeek-Reasonix/">官方网站</a>
+  &nbsp;·&nbsp;
+  <strong><a href="https://discord.gg/XF78rEME2D">Discord</a></strong>
+</p>
+
+> [!IMPORTANT]
+> **Reasonix 1.0 是用 Go 从零重写的版本** —— 本分支(`main-v2`)已是新的默认分支,后续开发都在这里。
+> 早期的 `0.x` TypeScript 版本转为 **legacy**,保留在 [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) 分支(仅维护)。
+> 详见**[迁移指南](./docs/MIGRATING.md)**。`npm i -g reasonix` 仍是安装命令——`1.0.0`+ 装的是 Go 二进制,`0.x` 是 legacy TS 版。
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/DeepSeek-Reasonix/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
+  <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/dm/reasonix.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/stargazers"><img src="https://img.shields.io/github/stars/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
+  <a href="https://atomgit.com/esengine/DeepSeek-Reasonix"><img src="https://atomgit.com/esengine/DeepSeek-Reasonix/star/badge.svg" alt="AtomGit stars"/></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/discussions"><img src="https://img.shields.io/github/discussions/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=58a6ff&labelColor=161b22&logo=github&logoColor=white" alt="Discussions"/></a>
+  <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
 </p>
 
 <p align="center">
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/extendai-lab.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
-  <a href="https://github.com/Linxira-OS/extendai-lab-cli/stargazers"><img src="https://img.shields.io/github/stars/Linxira-OS/extendai-lab-cli.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
-  <a href="https://github.com/Linxira-OS/extendai-lab-cli/graphs/contributors"><img src="https://img.shields.io/github/contributors/Linxira-OS/extendai-lab-cli.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
+  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/9e931d80-2050-4b10-902e-44970cc133ad.svg" alt="oosmetrics — Top 2 in Agents by velocity"/></a>
+  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/556d94b3-61b7-486b-baf2-888b9327deab.svg" alt="oosmetrics — Top 3 in LLMs by velocity"/></a>
+  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/0f457d4c-efca-4d15-ad2b-139691ff342c.svg" alt="oosmetrics — Top 3 in CLI by velocity"/></a>
 </p>
 
 <br/>
@@ -23,15 +46,12 @@
 
 <br/>
 
-> [!NOTE]
-> **上游项目：** 本项目 fork 自 [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix)（main-v2 分支）。
-> 我们在此基础上扩展了额外功能和定制。核心代码的所有功劳归于原作者。
-
-<br/>
+> [!IMPORTANT]
+> **加入社区 · Community** — 双语 Discord，提供安装答疑（`#help` / `#求助`）、工作流展示与功能想法。→ **<https://discord.gg/XF78rEME2D>**
 
 ## 特性
 
-- **配置驱动**：provider、agent、启用的工具、插件全部在 `extendai-lab.toml` 中声明，
+- **配置驱动**：provider、agent、启用的工具、插件全部在 `reasonix.toml` 中声明，
   内核无硬编码模型。
 - **多模型 · 可组合**：DeepSeek（flash/pro）与 MiMo 作为预设内置；任何 OpenAI 兼容
   端点都只是一条配置。可选让两个模型协同（执行器 + 规划器），各自独立、缓存稳定的 session。
@@ -43,41 +63,42 @@
 ## 安装
 
 ```sh
-npm i -g extendai-lab                  # 任意系统;自动拉取对应平台的原生二进制
+npm i -g reasonix                  # 任意系统;自动拉取对应平台的原生二进制
+brew install esengine/reasonix/reasonix   # macOS
 ```
 
 预编译归档(`darwin|linux|windows × amd64|arm64`)和 `SHA256SUMS` 见每个
-[GitHub release](https://github.com/Linxira-OS/extendai-lab-cli/releases)。
+[GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases)。
+
+### 代码签名
+
+Windows 构建使用 [SignPath 基金会](https://signpath.org/) 提供的免费代码签名证书,
+通过 [SignPath.io](https://signpath.io/) 完成签名。
 
 ### 从源码构建
 
 ```sh
-make build      # -> bin/extendai-lab
+make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 ```
 
 ## 快速开始
 
 ```sh
-extendai-lab setup                      # 配置向导 → ./extendai-lab.toml
+reasonix setup                      # 配置向导 → ./reasonix.toml
 export DEEPSEEK_API_KEY=sk-...  # 或写入 .env（见 .env.example）
-extendai-lab chat                       # 然后在会话里运行 /init 生成 AGENTS.md（项目记忆）
-extendai-lab run "把 main.go 里的 TODO 实现掉"
-extendai-lab run --model mimo-pro "给这个函数补单元测试"
-echo "解释这段代码" | extendai-lab run
+reasonix chat                       # 然后在会话里运行 /init 生成 AGENTS.md（项目记忆）
+reasonix run "把 main.go 里的 TODO 实现掉"
+reasonix run --model mimo-pro "给这个函数补单元测试"
+echo "解释这段代码" | reasonix run
 ```
 
 ## 配置
 
-优先级：**flag > `./extendai-lab.toml` > `~/.config/extendai-lab/config.toml` > 内置默认值**。
-密钥经环境变量通过 `api_key_env` 注入，绝不写入配置文件。
+一个最小的 `reasonix.toml`——一个 provider 加一个默认模型——就够跑起来:
 
 ```toml
-default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可加规划器
-
-[agent]
-# planner_model = "mimo-pro"          # 可选的低频规划器
-auto_plan = "ask"                  # off|ask|on；复杂聊天任务自动进入计划模式
+default_model = "deepseek-flash"
 
 [[providers]]
 name        = "deepseek-flash"
@@ -85,51 +106,72 @@ kind        = "openai"
 base_url    = "https://api.deepseek.com"
 model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
-
-[tools]
-enabled = []   # 省略/为空 = 全部内置工具
-
-[permissions]
-mode  = "ask"                                # 无规则命中时 writer 的兜底：ask|allow|deny
-deny  = ["bash(rm -rf*)", "bash(git push*)"] # 任何模式下都硬阻断
-allow = ["bash(go test*)"]                   # 从不询问
-
-[sandbox]
-# workspace_root = ""          # 文件写工具被限制在此目录；留空 = 当前目录
-
-[[plugins]]
-name    = "example"
-command = "extendai-lab-plugin-example"
 ```
 
-## 架构
+优先级为 **flag > `./reasonix.toml` > `~/.config/reasonix/config.toml` > 内置默认值**;
+密钥经环境变量通过 `api_key_env` 注入,绝不写入配置文件。权限、沙盒、插件(MCP)、
+斜杠命令、`@` 引用与双模型设置,全部在 **[指南](./docs/GUIDE.zh-CN.md)** 里。
 
-三层可扩展性，全部藏在内核按名解析的 registry 之后：
+## 文档
 
-1. **Registry**：`Provider` 与 `Tool` 是接口；内核没有 `switch model`。
-2. **编译期内置**：provider（`provider/openai`）和 tool（`tool/builtin`）通过
-   `init()` 自注册，`main` 用 blank import 拉入。新增内置 = 一个文件 + 一行 import。
-3. **运行时插件**：配置里声明的可执行文件，通过 stdin/stdout 上的
-   newline-delimited JSON-RPC 2.0（MCP stdio 约定）通信，每个远程 tool 适配成
-   `Tool` 接口。
+- **[指南](./docs/GUIDE.zh-CN.md)** —— 配置、权限与沙盒、插件(MCP)、斜杠命令、
+  `@` 引用、双模型协同。
+- **[规格](./docs/SPEC.md)** —— 工程契约:架构、registry、数据类型与路线图。
+- **[从 0.x 迁移](./docs/MIGRATING.md)** —— 从 legacy TypeScript 版本迁到 1.0 Go 重写版。
+- **[Checkpoints 与 rewind](./docs/CHECKPOINTS.md)** —— 基于快照的编辑安全网
+  (Esc-Esc / `/rewind`)。
 
-## 上游致谢
+<br/>
 
-本项目基于 [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix)
-由 [esengine](https://github.com/esengine) 开发。我们感谢他们在构建核心 Go agent 框架方面的出色工作。
+## Star 趋势
 
-主要上游贡献者（按字母顺序）：
-- [ctharvey](https://github.com/ctharvey)
-- [dimasd-angga](https://github.com/dimasd-angga)
-- [Evan-Pycraft](https://github.com/Evan-Pycraft)
-- [ForeverYoungPp](https://github.com/ForeverYoungPp)
-- [GTC2080](https://github.com/GTC2080)
-- [kabaka9527](https://github.com/kabaka9527)
-- [lisniuse](https://github.com/lisniuse)
-- [wade19990814-hue](https://github.com/wade19990814-hue)
-- [wviana](https://github.com/wviana)
+<a href="https://www.star-history.com/?repos=esengine%2FDeepSeek-Reasonix&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
+ </picture>
+</a>
 
-Logo 设计遵循 [Linxira OS 品牌规范](https://linxira-os.github.io/brand/)。
+<br/>
+
+## 支持本项目
+
+如果 Reasonix 帮你省了时间或 token，欢迎请杯咖啡。捐助不会换来 feature 优先级，也不会影响 issue 的处理顺序——就是「谢谢」。
+
+- **国内** — 微信支付（扫下方二维码）
+- **海外** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
+
+<p align="center">
+  <img src=".github/sponsor/wechat-pay.jpg" alt="微信支付收款码" width="240"/>
+</p>
+
+<br/>
+
+## 致谢
+
+下面这些朋友的工作塑造了 Reasonix 今天的样子 —— 综合 commit 数和代码量两个维度。
+**按字母顺序排列，排名不分先后。** 完整贡献者列表在
+[GitHub](https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors)。
+
+- [**ctharvey**](https://github.com/ctharvey)
+- [**dimasd-angga**](https://github.com/dimasd-angga)（Dimas D. Angga）
+- [**Evan-Pycraft**](https://github.com/Evan-Pycraft)
+- [**ForeverYoungPp**](https://github.com/ForeverYoungPp)
+- [**GTC2080**](https://github.com/GTC2080)（TaoMu）
+- [**kabaka9527**](https://github.com/kabaka9527)
+- [**lisniuse**](https://github.com/lisniuse)（Richie）
+- [**wade19990814-hue**](https://github.com/wade19990814-hue)
+- [**wviana**](https://github.com/wviana)（Wesley Viana）
+
+另外特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo，
+以及 [AIGC Link](https://xhslink.com/m/80ngts127cA) 在小红书上的推广。
+
+<p align="center">
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=esengine/DeepSeek-Reasonix&max=100&columns=12" alt="esengine/DeepSeek-Reasonix 贡献者" width="860"/>
+  </a>
+</p>
 
 <br/>
 
@@ -138,5 +180,5 @@ Logo 设计遵循 [Linxira OS 品牌规范](https://linxira-os.github.io/brand/)
 <p align="center">
   <sub>MIT —— 见 <a href="./LICENSE">LICENSE</a></sub>
   <br/>
-  <sub>基于 <a href="https://github.com/esengine/DeepSeek-Reasonix">DeepSeek-Reasonix</a> by esengine</sub>
+  <sub>由 <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a> 社区共建</sub>
 </p>

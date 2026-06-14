@@ -146,7 +146,7 @@ func ratio(n, d int) float64 {
 // attempt's generated tests but keeping the provider config the workflow wrote.
 func resetTree(repo string) {
 	_ = exec.Command("git", "-C", repo, "checkout", "--", ".").Run()
-	_ = exec.Command("git", "-C", repo, "clean", "-fd", "-e", "extendai-lab.toml").Run()
+	_ = exec.Command("git", "-C", repo, "clean", "-fd", "-e", "reasonix.toml").Run()
 }
 
 func goBuildAll(repo string) (bool, string) {

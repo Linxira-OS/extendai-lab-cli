@@ -18,7 +18,7 @@ import (
 // saved, and reads individual facts on demand with read_file. The whole thing is
 // plain files the user can edit by hand.
 type Store struct {
-	Dir string // ...extendai-lab/projects/<slug>/memory
+	Dir string // ...reasonix/projects/<slug>/memory
 }
 
 // Type classifies a memory, mirroring the auto-memory taxonomy.
@@ -130,10 +130,39 @@ func (s Store) Delete(name string) error {
 	if name == "" {
 		return fmt.Errorf("memory needs a name")
 	}
-	if err := os.Remove(filepath.Join(s.Dir, name+".md")); err != nil && !os.IsNotExist(err) {
+	if err := removeMemoryFile(filepath.Join(s.Dir, name+".md")); err != nil {
 		return err
 	}
 	return s.flushIndex(s.indexLinesExcept(name))
+}
+
+func removeMemoryFile(path string) error {
+	err := os.Remove(path)
+	if err == nil || os.IsNotExist(err) {
+		return nil
+	}
+	if !os.IsPermission(err) {
+		return err
+	}
+	repairOwnerWrite(path, false)
+	repairOwnerWrite(filepath.Dir(path), true)
+	err = os.Remove(path)
+	if err == nil || os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+func repairOwnerWrite(path string, dir bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	need := os.FileMode(0o600)
+	if dir {
+		need = 0o700
+	}
+	_ = os.Chmod(path, info.Mode().Perm()|need)
 }
 
 // render serializes a memory to frontmatter + body. The frontmatter mirrors the

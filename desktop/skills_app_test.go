@@ -30,7 +30,7 @@ func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
-	root := filepath.Join(project, ".extendai-lab", "skills")
+	root := filepath.Join(project, ".reasonix", "skills")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}

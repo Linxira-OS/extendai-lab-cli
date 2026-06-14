@@ -3,12 +3,16 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/config"
@@ -46,6 +50,19 @@ func TestChdirTo(t *testing.T) {
 
 	if rc := chdirTo(filepath.Join(tmp, "does-not-exist")); rc != 2 {
 		t.Fatalf("chdirTo(missing) = %d, want 2", rc)
+	}
+}
+
+func TestReserveNativeScrollbackFrameWritesOnlyNewlines(t *testing.T) {
+	var b bytes.Buffer
+	reserveNativeScrollbackFrame(&b, 3)
+	if got := b.String(); got != "\n\n\n" {
+		t.Fatalf("reserveNativeScrollbackFrame wrote %q, want only three newlines", got)
+	}
+
+	reserveNativeScrollbackFrame(&b, 0)
+	if got := b.String(); got != "\n\n\n" {
+		t.Fatalf("reserveNativeScrollbackFrame(0) changed output to %q", got)
 	}
 }
 
@@ -92,8 +109,11 @@ func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 			t.Fatalf("help rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, "Usage:") {
+	if !strings.Contains(out, "Usage:") && !strings.Contains(out, "用法：") {
 		t.Fatalf("help output missing usage:\n%s", out)
+	}
+	if !strings.Contains(out, "reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>") {
+		t.Fatalf("help output missing run resume flags:\n%s", out)
 	}
 }
 
@@ -113,7 +133,7 @@ func TestRunDispatchesACPLongFlagAlias(t *testing.T) {
 
 func TestRunMigratesLegacyConfigBeforeConfigOnlyCommands(t *testing.T) {
 	isolateCLIConfigHome(t)
-	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "extendai-lab.toml")
+	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +169,7 @@ command = "legacy-bin"
 
 func TestRunMetadataCommandsDoNotMigrateLegacyConfig(t *testing.T) {
 	isolateCLIConfigHome(t)
-	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "extendai-lab.toml")
+	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +225,7 @@ func TestConfigAutoPlanLocalCreatesMinimalProjectOverride(t *testing.T) {
 		t.Fatalf("config auto-plan --local output = %q", out)
 	}
 
-	body, err := os.ReadFile("extendai-lab.toml")
+	body, err := os.ReadFile("reasonix.toml")
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
@@ -232,11 +252,76 @@ func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
 	if welcomeShouldPromptMissingKeys("", nil) {
 		t.Fatal("built-in defaults without a config source should not prompt for missing provider keys")
 	}
-	if welcomeShouldPromptMissingKeys("extendai-lab.toml", errors.New("bad config")) {
+	if welcomeShouldPromptMissingKeys("reasonix.toml", errors.New("bad config")) {
 		t.Fatal("invalid config should not enter the missing-key prompt path")
 	}
-	if !welcomeShouldPromptMissingKeys("extendai-lab.toml", nil) {
+	if !welcomeShouldPromptMissingKeys("reasonix.toml", nil) {
 		t.Fatal("valid config source should enter the missing-key prompt path")
+	}
+}
+
+func TestProvidersWithMissingKeysOnlyChecksActiveDefaultModel(t *testing.T) {
+	cfg := config.Default()
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("MIMO_API_KEY", "")
+
+	missing := providersWithMissingKeys(cfg)
+	if len(missing) != 1 {
+		t.Fatalf("missing providers = %+v, want only active default model provider", missing)
+	}
+	if missing[0].APIKeyEnv != "DEEPSEEK_API_KEY" {
+		t.Fatalf("missing key env = %q, want DEEPSEEK_API_KEY", missing[0].APIKeyEnv)
+	}
+}
+
+func TestProvidersWithMissingKeysIgnoresUnusedBuiltInPresets(t *testing.T) {
+	cfg := config.Default()
+	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	t.Setenv("MIMO_API_KEY", "")
+
+	if missing := providersWithMissingKeys(cfg); len(missing) != 0 {
+		t.Fatalf("missing providers = %+v, want none when only unused MiMo presets are keyless", missing)
+	}
+}
+
+func TestProvidersWithMissingKeysIncludesReferencedSecondaryModels(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.PlannerModel = "mimo-pro"
+	cfg.Agent.SubagentModel = "mimo-flash"
+	cfg.Agent.SubagentModels = map[string]string{
+		"review": "mimo-pro/mimo-v2.5-pro",
+	}
+	cfg.Agent.AutoPlanClassifier = "mimo-flash/mimo-v2.5"
+	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	t.Setenv("MIMO_API_KEY", "")
+
+	missing := providersWithMissingKeys(cfg)
+	if len(missing) != 1 {
+		t.Fatalf("missing providers = %+v, want MiMo once", missing)
+	}
+	if missing[0].APIKeyEnv != "MIMO_API_KEY" {
+		t.Fatalf("missing key env = %q, want MIMO_API_KEY", missing[0].APIKeyEnv)
+	}
+}
+
+func TestProvidersWithMissingKeysSkipsDisabledAutoPlanClassifier(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.AutoPlan = "off"
+	cfg.Agent.AutoPlanClassifier = "mimo-flash/mimo-v2.5"
+	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	t.Setenv("MIMO_API_KEY", "")
+
+	if missing := providersWithMissingKeys(cfg); len(missing) != 0 {
+		t.Fatalf("missing providers = %+v, want none when auto-plan classifier is disabled", missing)
+	}
+
+	cfg.Agent.AutoPlan = "on"
+	missing := providersWithMissingKeys(cfg)
+	if len(missing) != 1 {
+		t.Fatalf("missing providers = %+v, want enabled auto-plan classifier provider", missing)
+	}
+	if missing[0].APIKeyEnv != "MIMO_API_KEY" {
+		t.Fatalf("missing key env = %q, want MIMO_API_KEY", missing[0].APIKeyEnv)
 	}
 }
 
@@ -482,6 +567,87 @@ func TestFetchOrFallback(t *testing.T) {
 	})
 }
 
+// TestFetchModelListCompatWalksCandidates covers the wizard's custom-provider
+// model probe. Previously the probe was a single URL (baseURL+"/models"),
+// which worked for OpenAI vendors with a /v1 base URL but silently failed
+// for Anthropic-style root URLs (no /v1) and Anthropic-compatible proxies
+// (a /v1 base URL but a /v1/messages endpoint). The new helper walks
+// BuildModelFetchURLs's candidate list — root + /v1 + known compat
+// suffixes — so the same probe now succeeds for both shapes, matching
+// what the conversation-time client URL will actually be.
+func TestFetchModelListCompatWalksCandidates(t *testing.T) {
+	t.Run("anthropic root form resolves via v1 fallback", func(t *testing.T) {
+		var gotPath atomic.Value
+		gotPath.Store("")
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath.Store(r.URL.Path)
+			if r.URL.Path == "/v1/models" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"data":[{"id":"claude-test"}]}`)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		models, err := fetchModelListCompat(context.Background(), srv.URL, "k")
+		if err != nil {
+			t.Fatalf("fetchModelListCompat: %v", err)
+		}
+		if !reflect.DeepEqual(models, []string{"claude-test"}) {
+			t.Errorf("models = %v, want [claude-test]", models)
+		}
+		if got := gotPath.Load().(string); got != "/v1/models" {
+			t.Errorf("probe path = %q, want /v1/models (root form should fall through to v1 candidate)", got)
+		}
+	})
+
+	t.Run("versioned v1 base URL hits models directly", func(t *testing.T) {
+		var gotPath atomic.Value
+		gotPath.Store("")
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath.Store(r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":[{"id":"model-a"}]}`)
+		}))
+		defer srv.Close()
+
+		models, err := fetchModelListCompat(context.Background(), srv.URL+"/v1", "k")
+		if err != nil {
+			t.Fatalf("fetchModelListCompat: %v", err)
+		}
+		if !reflect.DeepEqual(models, []string{"model-a"}) {
+			t.Errorf("models = %v, want [model-a]", models)
+		}
+		if got := gotPath.Load().(string); got != "/v1/models" {
+			t.Errorf("probe path = %q, want /v1/models", got)
+		}
+	})
+
+	t.Run("endpoint-miss on every candidate returns empty (manual flow)", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		models, err := fetchModelListCompat(context.Background(), srv.URL, "k")
+		if err != nil {
+			t.Fatalf("expected graceful empty result on all-miss, got err: %v", err)
+		}
+		if len(models) != 0 {
+			t.Errorf("expected empty models on all-miss, got %v", models)
+		}
+	})
+
+	t.Run("non-404 network error short-circuits with the real error", func(t *testing.T) {
+		// Point at a closed port — connection refused, not a 404.
+		models, err := fetchModelListCompat(context.Background(), "http://127.0.0.1:1", "k")
+		if err == nil {
+			t.Fatalf("expected error for unreachable host, got models=%v", models)
+		}
+	})
+}
+
 // TestFamilyStaticModels proves the offline fallback unions every member of a
 // family (the flash + pro SKUs), not just the first — the regression that left
 // users with only flash when the live /models probe failed.
@@ -642,7 +808,7 @@ func TestProviderSlug(t *testing.T) {
 
 // TestFilterStaleCustomEntries covers the wizard's auto-cleanup of legacy
 // "custom" / "anthropic" magic-name entries that previous versions wrote
-// into extendai-lab.toml. These collide with the wizard's own menu items, so
+// into reasonix.toml. These collide with the wizard's own menu items, so
 // they're dropped from the providers list before grouping — but the caller
 // still gets them back in the dropped slice to surface a warning.
 func TestFilterStaleCustomEntries(t *testing.T) {
@@ -690,7 +856,7 @@ func TestFilterStaleCustomEntries(t *testing.T) {
 }
 
 func TestWithBuiltinFamiliesAddsMissingMiMo(t *testing.T) {
-	// The user's case: a extendai-lab.toml that defines only deepseek providers.
+	// The user's case: a reasonix.toml that defines only deepseek providers.
 	cfg := []config.ProviderEntry{
 		{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com"},
 		{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com"},
@@ -715,7 +881,7 @@ func groupByFamilyKeys(ps []config.ProviderEntry, key string) []int {
 }
 
 func TestWriteDefaultConfigDisablesCodegraph(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "extendai-lab.toml")
+	path := filepath.Join(t.TempDir(), "reasonix.toml")
 	if rc := writeDefaultConfig(path); rc != 0 {
 		t.Fatalf("writeDefaultConfig rc = %d", rc)
 	}
@@ -743,4 +909,34 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestProvidersWithMissingKeysOnlyReferenced(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("MIMO_API_KEY", "")
+	cfg := config.Default()
+
+	got := providersWithMissingKeys(cfg)
+	envs := map[string]bool{}
+	for _, p := range got {
+		envs[p.APIKeyEnv] = true
+	}
+	if !envs["DEEPSEEK_API_KEY"] {
+		t.Errorf("the default model's missing key must be prompted, got %v", got)
+	}
+	if envs["MIMO_API_KEY"] {
+		t.Errorf("unreferenced preset keys must not be prompted, got %v", got)
+	}
+}
+
+func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "set")
+	t.Setenv("MIMO_API_KEY", "")
+	cfg := config.Default()
+	cfg.Agent.PlannerModel = "mimo-pro"
+
+	got := providersWithMissingKeys(cfg)
+	if len(got) != 1 || got[0].APIKeyEnv != "MIMO_API_KEY" {
+		t.Errorf("planner model's missing key must be prompted, got %+v", got)
+	}
 }
